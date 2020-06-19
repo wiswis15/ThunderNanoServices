@@ -266,7 +266,7 @@ namespace Plugin {
             }
             ControlFlow(const evt_cmd_status& info)
             {
-                FORMAT_EVENT(EVT_CMD_COMPLETE);
+                FORMAT_EVENT(EVT_CMD_STATUS);
                 const char* group;
                 const uint16_t opcode = UnpackOpcode(btohs(info.opcode), &group);
                 Format(_T("group=%s, opcode=0x%03X, status=%d"), group, opcode, info.status);

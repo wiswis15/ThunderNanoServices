@@ -1045,7 +1045,7 @@ class BluetoothControl : public PluginHost::IPlugin
                     Bluetooth::HCISocket::Command::Disconnect disconnect;
 
                     disconnect->handle = htobs(ConnectionId());
-                    disconnect->reason = HCI_CONNECTION_TERMINATED;
+                    disconnect->reason = HCI_OE_USER_ENDED_CONNECTION;
 
                     result = _parent->Connector().Exchange(MAX_ACTION_TIMEOUT, disconnect, disconnect);
                     if (result == Core::ERROR_NONE) {
@@ -1634,8 +1634,9 @@ class BluetoothControl : public PluginHost::IPlugin
 
                             result = _parent->Connector().Exchange(MAX_ACTION_TIMEOUT, connect, connect);
                             if (result == Core::ERROR_NONE) {
-                                if (connect.Result() == 0) {
-                                    Connection(btohs(connect.Response().handle));
+                                const uint16_t handle = btohs(connect.Response().handle);
+                                if ((connect.Result() == 0) && (handle != 0)){
+                                    Connection(handle);
                                 } else {
                                     result = Core::ERROR_ASYNC_FAILED;
                                     TRACE(ControlFlow, (_T("Connect command failed [%d]"), connect.Result()));
