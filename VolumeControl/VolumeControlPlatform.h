@@ -19,28 +19,22 @@
  
 #pragma once
 
-#include <functional>
-#include <memory>
+#include "Module.h"
 
-namespace WPEFramework {
-namespace Plugin {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-    class VolumeControlPlatform {
-    public:
-        using VolumeChangedCallback = std::function<void()>;
-        using MutedChangedCallback = std::function<void()>;
+/**
+ * Function to request the current volume (0-100%)
+ */
+uint32_t platform_get_volume(uint8_t* volume);
 
-        static std::unique_ptr<VolumeControlPlatform> Create(
-            VolumeChangedCallback&& volumeChanged,
-            MutedChangedCallback&& mutedChanged);
+/**
+ * Function to set the current volume (0-100%)
+ */
+uint32_t platform_get_volume(const uint8_t volume);
 
-        virtual ~VolumeControlPlatform() {}
-
-        virtual uint32_t Muted(bool muted) = 0;
-        virtual bool Muted() const = 0;
-        virtual uint32_t Volume(uint8_t volume) = 0;
-        virtual uint8_t Volume() const = 0;
-    };
-
-}  // namespace Plugin
-}  // namespace WPEFramework
+#ifdef __cplusplus
+}
+#endif

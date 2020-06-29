@@ -26,64 +26,94 @@ namespace Plugin {
 
     const string VolumeControl::Initialize(PluginHost::IShell* service)
     {
-        ASSERT (_service == nullptr);
-        ASSERT (service != nullptr);
+        Exchange::JVolumeControl::Register(*this, _implementation);
+        platform_get_volume(_volume);
 
-        _service = service;
-        _service->Register(&_connectionNotification);
-
-        string result;
-        _implementation = _service->Root<Exchange::IVolumeControl>(_connectionId, 2000, _T("VolumeControlImplementation"));
-        if (_implementation == nullptr) {
-            result = _T("Couldn't create volume control instance");
-        } else {
-          _implementation->Register(&_volumeNotification);
-          Exchange::JVolumeControl::Register(*this, _implementation);
-        }
-
-        return (result);
+        return (EMPTY_STRING);
     }
 
     void VolumeControl::Deinitialize(PluginHost::IShell* service)
     {
-        ASSERT(_service == service);
-
         Exchange::JVolumeControl::Unregister(*this);
-
-        _service->Unregister(&_connectionNotification);
-        _implementation->Unregister(&_volumeNotification);
-
-        if (_implementation->Release() != Core::ERROR_DESTRUCTION_SUCCEEDED) {
-
-            ASSERT(_connectionId != 0);
-
-            RPC::IRemoteConnection* connection(_service->RemoteConnection(_connectionId));
-
-            // The process can disappear in the meantime...
-            if (connection != nullptr) {
-                // But if it did not dissapear in the meantime, forcefully terminate it. Shoot to kill :-)
-                connection->Terminate();
-                connection->Release();
-            }
-        }
-
-        _service = nullptr;
-        _implementation = nullptr;
     }
 
     string VolumeControl::Information() const
     {
-        return string();
+        return EMPTY_STRING;
     }
 
-    void VolumeControl::Deactivated(RPC::IRemoteConnection* connection)
+    void VolumeControl::Register(Exchange::IVolumeControl::INotification* notification) /* override */
     {
-        if (connection->Id() == _connectionId) {
-            ASSERT(_service != nullptr);
-            Core::IWorkerPool::Instance().Submit(PluginHost::IShell::Job::Create(_service,
-                PluginHost::IShell::DEACTIVATED,
-                PluginHost::IShell::FAILURE));
+        ASSERT(notification != nullptr);
+        ASSERT(std::find(_notifications.begin(), _notifications.end(), notification) == _notification.end());
+        _adminLock.Lock();
+        notification->AddRef();
+        _notifications.push_back(notification);
+        _adminLock.Unlock();
+    }
+
+    void VolumeControl::Unregister(const Exchange::IVolumeControl::INotification* notification)
+    {
+        ASSERT(notification != nullptr);
+        _adminLock.Lock();
+        auto item = std::find(_notifications.begin(), _notifications.end(), notification);
+        ASSERT(item != _notifications.end());
+        _notifications.erase(item);
+        notification->Release();
+        _adminLock.Unlock();
+    }
+
+
+    uint32_t VolumeControl::Muted(const bool muted)
+    {
+        uint32_t result = Core::ERROR_NONE;
+
+        _adminLock.Lock();
+
+        if (((_volume & MUTED) != 0) ^ (muted == true)) {
+            result = platform_set_volume(muted ? 0 : (_volume & ~MUTED));
+            if (result == Core::ERROR_NONE) {
+                _volume = (muted ? (MUTED | _volume) : (_volume & ~MUTED));
+                for (auto* notification : _notifications) {
+                    notification->Muted(muted);
+                }
+            }
         }
+
+        _adminLock.Unlock();
+
+        return (result);
+    }
+
+    uint32_t VolumeControl::Muted(bool& muted) const
+    {
+        muted = ((_volume & MUTED) != 0);
+        return Core::ERROR_NONE;
+    }
+
+    uint32_t VolumeControl::Volume(const uint8_t volume)
+    {
+        uint32_t result = (volume <= 100 ? Core::ERROR_NONE : Core::ERROR_BAD_REQUEST);
+
+        _adminLock.Lock();
+
+        if ((volume < 100) && ((_volume & ~MUTED) != volume)) {
+            result = platform_set_volume(volume);
+            if (result == Core::ERROR_NONE) {
+                _volume = (volume | (_volume & MUTED));
+                for (auto* notification : _notifications) {
+                    notification->Volume(volume);
+                }
+            }
+        }
+        
+        return (result);
+    }
+
+    uint32_t VolumeControl::Volume(uint8_t& vol) const
+    {
+        vol = (_volume & ~MUTED);
+        return Core::ERROR_NONE;
     }
 
 } // namespace Plugin

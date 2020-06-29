@@ -17,7 +17,6 @@
  * limitations under the License.
  */
  
-#include "../Module.h"
 #include "../VolumeControlPlatform.h"
 
 #include <nexus_config.h>
@@ -31,119 +30,91 @@ namespace Plugin {
 
 namespace {
 
+class Nexus {
+public:
+    Nexus() {
+        NxClient_JoinSettings joinSettings;
+        NxClient_GetDefaultJoinSettings(&joinSettings);
+        snprintf(joinSettings.name, NXCLIENT_MAX_NAME, "%s", "wpevolumecontrol");
+        NxClient_Join(&joinSettings);
+        NxClient_UnregisterAcknowledgeStandby(NxClient_RegisterAcknowledgeStandby());
+    }
+    ~Nexus() override
+    {
+        NxClient_Uninit();
+    }
+};
+
+static Nexus _initialization;
+
+}  // nameless namespace
+
 constexpr uint8_t kMinVolume = 0;
 constexpr uint8_t kMaxVolume = 100;
 
-class VolumeControlPlatformNexus : public VolumeControlPlatform {
-public:
+static int32_t ToNexusLinear(const uint8_t vol)
+{
+    return std::round(static_cast<double>((vol * (NEXUS_AUDIO_VOLUME_LINEAR_NORMAL - NEXUS_AUDIO_VOLUME_LINEAR_MIN)) /
+          (kMaxVolume - kMinVolume)) + NEXUS_AUDIO_VOLUME_LINEAR_MIN);
+}
 
-  VolumeControlPlatformNexus()
-  {
-      NxClient_JoinSettings joinSettings;
-      NxClient_GetDefaultJoinSettings(&joinSettings);
-      snprintf(joinSettings.name, NXCLIENT_MAX_NAME, "%s", "wpevolumecontrol");
-      NxClient_Join(&joinSettings);
-      NxClient_UnregisterAcknowledgeStandby(NxClient_RegisterAcknowledgeStandby());
-  }
+static uint8_t FromNexusLinear(const int32_t vol)
+{
+    return  std::round(static_cast<double>((vol - NEXUS_AUDIO_VOLUME_LINEAR_MIN) * (kMaxVolume - kMinVolume)) /
+          (NEXUS_AUDIO_VOLUME_LINEAR_NORMAL - NEXUS_AUDIO_VOLUME_LINEAR_MIN));
+}
 
-  ~VolumeControlPlatformNexus() override
-  {
-      NxClient_Uninit();
-  }
+static int32_t ToNexusDb(const uint8_t vol)
+{
+    int32_t result = 0;
+    auto gain = 2000.0 * log10(static_cast<double>(vol) / (kMaxVolume - kMinVolume));
+    if (isinf(gain)) {
+        result = NEXUS_AUDIO_VOLUME_DB_MIN;
+    } else if (gain == 0) {
+        result = NEXUS_AUDIO_VOLUME_DB_NORMAL;
+    } else {
+        result = NEXUS_AUDIO_VOLUME_DB_NORMAL + std::floor(gain);
+    }
 
-  uint32_t Muted(bool muted) override
-  {
-      NxClient_AudioSettings audioSettings;
-      NxClient_GetAudioSettings(&audioSettings);
-      audioSettings.muted = muted;
-      uint32_t result = NxClient_SetAudioSettings(&audioSettings) != 0 ?
-            Core::ERROR_GENERAL :
-            Core::ERROR_NONE;
+    return std::max(NEXUS_AUDIO_VOLUME_DB_MIN, result);
+}
 
-      return result;
-  }
+static uint8_t FromNexusDb(const int32_t vol)
+{
+    auto gain = NEXUS_AUDIO_VOLUME_DB_NORMAL - vol;
+    auto factor = std::pow(10, (static_cast<double>(gain) / 2000.0));
+    return std::round((kMaxVolume - kMinVolume) / factor);
+}
 
-  bool Muted() const override
-  {
-      NxClient_AudioSettings audioSettings;
-      NxClient_GetAudioSettings(&audioSettings);
-      return audioSettings.muted;
-  }
-
-  uint32_t Volume(uint8_t volume) override
-  {
-      volume = std::max(volume, kMinVolume);
-      volume = std::min(volume, kMaxVolume);
-      int32_t toSet = volume;
-      NxClient_AudioSettings audioSettings;
-      NxClient_GetAudioSettings(&audioSettings);
-      if (audioSettings.volumeType == NEXUS_AudioVolumeType_eDecibel) {
+uint32_t platform_set_volume(uint8_t volume)
+{
+    volume = std::max(volume, kMinVolume);
+    volume = std::min(volume, kMaxVolume);
+    int32_t toSet = volume;
+    NxClient_AudioSettings audioSettings;
+    NxClient_GetAudioSettings(&audioSettings);
+    if (audioSettings.volumeType == NEXUS_AudioVolumeType_eDecibel) {
           toSet = VolumeControlPlatformNexus::ToNexusDb(volume);
-      } else {
+    } else {
           toSet = VolumeControlPlatformNexus::ToNexusLinear(volume);
-      }
+    }
+    audioSettings.muted = (volume == 0);
 
-      audioSettings.leftVolume = audioSettings.rightVolume = toSet;
-      return NxClient_SetAudioSettings(&audioSettings) != 0 ?
-            Core::ERROR_GENERAL :
-            Core::ERROR_NONE;
-  }
+    audioSettings.leftVolume = audioSettings.rightVolume = toSet;
+    return NxClient_SetAudioSettings(&audioSettings) != 0 ?
+           Core::ERROR_GENERAL :
+           Core::ERROR_NONE;
+}
 
-  uint8_t Volume() const override
-  {
-      NxClient_AudioSettings audioSettings;
-      NxClient_GetAudioSettings(&audioSettings);
-      ASSERT(audioSettings.leftVolume == audioSettings.rightVolume);
-      return audioSettings.volumeType == NEXUS_AudioVolumeType_eDecibel ?
+uint32_t platform_get_volume(uint8_t* volume)
+{
+    NxClient_AudioSettings audioSettings;
+    NxClient_GetAudioSettings(&audioSettings);
+    ASSERT(audioSettings.leftVolume == audioSettings.rightVolume);
+    *volume = audioSettings.volumeType == NEXUS_AudioVolumeType_eDecibel ?
           VolumeControlPlatformNexus::FromNexusDb(audioSettings.leftVolume) :
           VolumeControlPlatformNexus::FromNexusLinear(audioSettings.leftVolume);
-  }
 
-private:
-  static int32_t ToNexusLinear(uint8_t vol)
-  {
-      return std::round(static_cast<double>((vol * (NEXUS_AUDIO_VOLUME_LINEAR_NORMAL - NEXUS_AUDIO_VOLUME_LINEAR_MIN)) /
-          (kMaxVolume - kMinVolume)) + NEXUS_AUDIO_VOLUME_LINEAR_MIN);
-  }
-
-  static uint8_t FromNexusLinear(int32_t vol)
-  {
-      return  std::round(static_cast<double>((vol - NEXUS_AUDIO_VOLUME_LINEAR_MIN) * (kMaxVolume - kMinVolume)) /
-          (NEXUS_AUDIO_VOLUME_LINEAR_NORMAL - NEXUS_AUDIO_VOLUME_LINEAR_MIN));
-  }
-
-  static int32_t ToNexusDb(uint8_t vol)
-  {
-      int32_t result = 0;
-      auto gain = 2000.0 * log10(static_cast<double>(vol) / (kMaxVolume - kMinVolume));
-      if (isinf(gain)) {
-          result = NEXUS_AUDIO_VOLUME_DB_MIN;
-      } else if (gain == 0) {
-          result = NEXUS_AUDIO_VOLUME_DB_NORMAL;
-      } else {
-          result = NEXUS_AUDIO_VOLUME_DB_NORMAL + std::floor(gain);
-      }
-
-      return std::max(NEXUS_AUDIO_VOLUME_DB_MIN, result);
-  }
-
-  static uint8_t FromNexusDb(int32_t vol)
-  {
-      auto gain = NEXUS_AUDIO_VOLUME_DB_NORMAL - vol;
-      auto factor = std::pow(10, (static_cast<double>(gain) / 2000.0));
-      return std::round((kMaxVolume - kMinVolume) / factor);
-  }
-};
-
+    return (Core::ERROR_NONE); 
 }
 
-// static
-std::unique_ptr<VolumeControlPlatform> VolumeControlPlatform::Create(
-    VolumeControlPlatform::VolumeChangedCallback&& volumeChanged,
-    VolumeControlPlatform::MutedChangedCallback&& mutedChanged)
-{
-    return std::unique_ptr<VolumeControlPlatform>{new VolumeControlPlatformNexus};
-}
-
-}  // namespace Plugin
-}  // namespace WPEFramework

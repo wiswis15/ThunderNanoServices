@@ -17,7 +17,6 @@
 
 set(PLUGIN_NAME VolumeControl)
 set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
-set(PLAFORM_VOLUMECONTROL volumectrlplatform)
 
 find_package(${NAMESPACE}Plugins REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
@@ -27,7 +26,6 @@ find_package(NXCLIENT QUIET)
 
 add_library(${MODULE_NAME} SHARED
     VolumeControl.cpp
-    VolumeControlImplementation.cpp
     Module.cpp)
 
 set_target_properties(${MODULE_NAME} PROPERTIES
