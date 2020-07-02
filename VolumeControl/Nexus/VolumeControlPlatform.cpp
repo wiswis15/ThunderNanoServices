@@ -68,7 +68,7 @@ static int32_t ToNexusDb(const uint8_t vol)
 {
     int32_t result = 0;
     auto gain = 2000.0 * log10(static_cast<double>(vol) / (kMaxVolume - kMinVolume));
-    if (isinf(gain)) {
+    if (std::isinf(gain)) {
         result = NEXUS_AUDIO_VOLUME_DB_MIN;
     } else if (gain == 0) {
         result = NEXUS_AUDIO_VOLUME_DB_NORMAL;
