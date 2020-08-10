@@ -527,12 +527,14 @@ namespace Plugin {
             {
                 IApplication* application = nullptr;
                 if (config.Callsign.IsSet() == true) {
-                    return (new HANDLER(shell, config, parent));
+                    return (new typename HANDLER::Active(shell, config, parent));
+                } else {
+                    return (new typename HANDLER::Passive(shell, config, parent));
                 }
                 return application;
             }
         };
-        class EXTERNAL Protocol {
+        class Protocol {
         private:
             // -------------------------------------------------------------------
             // This object should not be copied or assigned. Prevent the copy

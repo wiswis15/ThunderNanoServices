@@ -25,13 +25,13 @@
 #include <nexus_platform.h>
 #include <nxclient.h>
 #include <nexus_core_utils.h>
+#include "nexus_hdmi_output_dba.h"
 
 #if ( (NEXUS_PLATFORM_VERSION_MAJOR > 18) ||  \
       ( (NEXUS_PLATFORM_VERSION_MAJOR == 18) && (NEXUS_PLATFORM_VERSION_MINOR >= 2) ) \
     )
 
 #define NEXUS_HDCPVERSION_SUPPORTED
-#define NEXUS_HDR_SUPPORTED
 
 #endif
 
@@ -50,6 +50,7 @@ public:
        , _type(HDR_OFF)
        , _totalGpuRam(0)
        , _audioPassthrough(false)
+       , _atmosSupport(false)
        , _adminLock()
        , _activity(*this) {
 
@@ -62,11 +63,9 @@ public:
 
         NexusHdmiOutput hdmihandle;
         if( hdmihandle ) {
-            UpdateDisplayInfoConnected(hdmihandle, _connected);
-            UpdateDisplayInfoVerticalFrequency(hdmihandle, _verticalFreq);
+            UpdateDisplayInfoConnected(hdmihandle, _connected, _width, _height, _verticalFreq, _type, _atmosSupport);
             UpdateDisplayInfoHDCP(hdmihandle, _hdcpprotection);
         }
-        UpdateDisplayInfoDisplayStatus(_width, _height, _type);
 
         UpdateAudioPassthrough(_audioPassthrough);
 
@@ -177,6 +176,9 @@ public:
     HDRType Type() const override
     {
         return _type;
+    }
+    bool IsAtmosSupported() const override {
+        return _atmosSupport;
     }
     HDCPProtectionType HDCPProtection() const override {
         return _hdcpprotection;
@@ -380,60 +382,69 @@ private:
             NEXUS_HdmiOutputHandle _hdmiOutput;
     };
 
-    void UpdateDisplayInfoConnected(const NEXUS_HdmiOutputHandle& hdmiOutput, bool& connected) const
+    void UpdateDisplayInfoConnected(const NEXUS_HdmiOutputHandle& hdmiOutput,
+                                    bool& connected, uint32_t& width, uint32_t& height,
+                                    uint32_t& verticalFreq, HDRType& hdr, bool& isAtmosSupported) const
     {
         NEXUS_HdmiOutputStatus status;
         NEXUS_Error rc = NEXUS_HdmiOutput_GetStatus(hdmiOutput, &status);
         if (rc == NEXUS_SUCCESS) {
             connected = status.connected;
-        }
-    }
+            if (connected == true) {
+                NxClient_DisplaySettings displaySettings;
+                NxClient_GetDisplaySettings(&displaySettings);
 
-    void UpdateDisplayInfoVerticalFrequency(const NEXUS_HdmiOutputHandle& hdmiOutput, uint32_t& verticalFreq) const
-    {
-        NEXUS_HdmiOutputStatus status;
-        NEXUS_Error rc = NEXUS_HdmiOutput_GetStatus(hdmiOutput, &status);
-        if (rc == NEXUS_SUCCESS) {
-            NEXUS_VideoFormat videoFormat = status.preferredVideoFormat;
-            NEXUS_VideoFormatInfo videoFormatInfo;
-            NEXUS_VideoFormat_GetInfo(videoFormat, &videoFormatInfo);
-
-            // TODO: do we need vertical freq as float, or is nearest uint enough?
-            verticalFreq = videoFormatInfo.verticalFreq + 50 / 100; // vertical frequency is stored multiplied by 100
-        }
-    }
-
-    void UpdateDisplayInfoDisplayStatus(uint32_t& width, uint32_t& height, HDRType& type) const
-    {
-        NxClient_DisplaySettings displaySettings;
-        NxClient_GetDisplaySettings(&displaySettings);
-#ifdef NEXUS_HDR_SUPPORTED
-        // Read HDR status
-        switch (displaySettings.hdmiPreferences.dynamicRangeMode) {
-        case NEXUS_VideoDynamicRangeMode_eHdr10: {
-            type = HDR_10;
-            break;
-        }
-        case NEXUS_VideoDynamicRangeMode_eHdr10Plus: {
-            type = HDR_10PLUS;
-            break;
-        }
-#else
-        switch  (displaySettings.hdmiPreferences.drmInfoFrame.eotf) {
-        case NEXUS_VideoEotf_eHdr10: {
-            type = HDR_10;
-            break;
-        }
+#if ((NEXUS_PLATFORM_VERSION_MAJOR >= 19) && (NEXUS_PLATFORM_VERSION_MINOR >= 2))
+                NEXUS_HdmiOutputEdidRxDolbyAudioCodecDependent edidDataDolby;
+                NEXUS_HdmiOutput_GetDbCodecDependentEdidData(hdmiOutput, &edidDataDolby);
+                isAtmosSupported = edidDataDolby.ddpAtmosSupported;
 #endif
-        default:
-            break;
+
+#if ((NEXUS_PLATFORM_VERSION_MAJOR >= 19) && (NEXUS_PLATFORM_VERSION_MINOR >= 2))
+                NEXUS_HdmiOutputEdidData edidData;
+                NEXUS_Error edidRc = NEXUS_HdmiOutput_GetEdidData(hdmiOutput, &edidData);
+                if(edidRc != NEXUS_SUCCESS){
+                    TRACE_L1(_T("Failed to get edidData with rc=%d", edidRc));
+                }
+                if(edidData.hdrdb.valid == true) {
+                    if((edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_eHdr10] == true) || (edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_ePq] == true)){
+                        hdr = HDR_10;
+                    } else if(edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_eHlg] == true) {
+                        hdr = HDR_HLG;
+                    } else {
+                        hdr = HDR_OFF;
+                    }
+                } else {
+                    TRACE_L1(_T("Failed to get edid hdr db"));
+                }
+#else
+                switch (displaySettings.hdmiPreferences.drmInfoFrame.eotf) {
+                case NEXUS_VideoEotf_eHdr10:
+                    hdr = HDR_10;
+                    break;
+                default:
+                    hdr = HDR_OFF;
+                    break;
+                }
+#endif
+
+                NEXUS_VideoFormatInfo videoFormatInfo;
+                NEXUS_VideoFormat_GetInfo(displaySettings.format, &videoFormatInfo);
+                width = videoFormatInfo.width;
+                height = videoFormatInfo.height;
+                verticalFreq = videoFormatInfo.verticalFreq;
+            } else {
+                width = 0;
+                height = 0;
+                verticalFreq = 0;
+                hdr = HDR_OFF;
+                isAtmosSupported = false;
+            }
         }
 
-        // Read display width and height
-        NEXUS_DisplayCapabilities capabilities;
-        NEXUS_GetDisplayCapabilities(&capabilities);
-        width = capabilities.display[0].graphics.width;
-        height = capabilities.display[0].graphics.height;
+        TRACE(Trace::Information, (_T("Display change: %s - %ix%i@%ihz, HDR:%i\n"),
+                                  (connected? _T("connected"):_T("disconnected")),
+                                  width, height, verticalFreq, hdr));
     }
 
     void UpdateDisplayInfoHDCP(const NEXUS_HdmiOutputHandle& hdmiOutput, HDCPProtectionType& hdcpprotection) const
@@ -518,7 +529,7 @@ private:
             TRACE_L1(_T("Error in starting nexus callback thread"));
         }
     }
-    
+
     static void Callback(void *cbData, int param)
     {
         DisplayInfoImplementation* platform = static_cast<DisplayInfoImplementation*>(cbData);
@@ -532,39 +543,39 @@ private:
 
     void UpdateDisplayInfo(const CallbackType callbacktype)
     {
-        switch ( callbacktype ) {
-        case CallbackType::HotPlug : { 
-            NexusHdmiOutput hdmihandle;
-            if( hdmihandle ) {
-                _adminLock.Lock();
-                UpdateDisplayInfoConnected(hdmihandle, _connected);
-                _adminLock.Unlock();
+        bool notify = false;
+        bool connected = false;
+
+        _adminLock.Lock();
+        NexusHdmiOutput hdmiHandle;
+        if (hdmiHandle) {
+            switch ( callbacktype ) {
+            case CallbackType::HDCP:  // HDCP settings changed
+                if (_connected == true) {
+                    UpdateDisplayInfoHDCP(hdmiHandle, _hdcpprotection);
+                    notify = true;
+                }
+                /* fall-through! */
+            case CallbackType::HotPlug:
+            case CallbackType::DisplaySettings:
+                UpdateDisplayInfoConnected(hdmiHandle, connected, _width, _height, _verticalFreq, _type, _atmosSupport);
+                if (connected == false) {
+                    _hdcpprotection = HDCP_Unencrypted;
+                    notify = _connected; // don't bother with notifying disconnected->disconnected
+                } else {
+                    notify = true;
+                }
+                _connected = connected;
+                break;
+            default:
+                break;
             }
-            break;
         }
-        case CallbackType::DisplaySettings : {  // DiplaySettings Changed
-            _adminLock.Lock();
-            UpdateDisplayInfoDisplayStatus(_width, _height, _type);
-            NexusHdmiOutput hdmihandle;
-            if( hdmihandle ) {
-                UpdateDisplayInfoVerticalFrequency(hdmihandle, _verticalFreq);
-            }
-            _adminLock.Unlock();
-            break;
+        _adminLock.Unlock();
+
+        if (notify == true) {
+            _activity.Submit();
         }
-        case CallbackType::HDCP : {  // HDCP settings changed
-            NexusHdmiOutput hdmihandle;
-            if( hdmihandle ) {
-                _adminLock.Lock();
-                UpdateDisplayInfoHDCP(hdmihandle, _hdcpprotection);
-                _adminLock.Unlock();
-            }
-            break;
-        }
-        default:
-            break;
-        }
-        _activity.Submit();
     }
 
 private:
@@ -578,6 +589,7 @@ private:
 
     uint64_t _totalGpuRam;
     bool _audioPassthrough;
+    bool _atmosSupport;
 
     std::list<IConnectionProperties::INotification*> _observers;
 
