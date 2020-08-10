@@ -51,6 +51,12 @@ set_audio_output_type(const enum WPEFramework::Exchange::Dolby::IOutput::Type ty
 EXTERNAL enum WPEFramework::Exchange::Dolby::IOutput::Type 
 get_audio_output_type(uint32_t& error);
 
+EXTERNAL uint32_t
+set_atmos_lock(bool enable);
+
+EXTERNAL bool
+get_atmos_lock(uint32_t& error);
+
 #ifdef __cplusplus
 }
 #endif

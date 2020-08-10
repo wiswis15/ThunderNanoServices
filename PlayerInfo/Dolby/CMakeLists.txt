@@ -17,7 +17,7 @@
 
 find_package(${NAMESPACE}Definitions REQUIRED)
 
-set(DOLBY_IMPLEMENTATION "NONE" CACHE STRING "Dolby C API implementation type." )
+set(PLUGIN_PLAYERINFO_DOLBY_IMPLEMENTATION "NONE" CACHE STRING "Dolby C API implementation type." )
 
 add_library(PlayerInfoDolby STATIC "")
 
@@ -25,7 +25,7 @@ target_include_directories(PlayerInfoDolby
     PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-if(${DOLBY_IMPLEMENTATION} STREQUAL "AMLogic")
+if(${PLUGIN_PLAYERINFO_DOLBY_IMPLEMENTATION} STREQUAL "AMLogic")
 
     find_library(DOLBY_LIBRARY
         NAMES dolbyms12)
@@ -39,6 +39,20 @@ if(${DOLBY_IMPLEMENTATION} STREQUAL "AMLogic")
             ${DOLBY_LIBRARY}
             ${NAMESPACE}Definitions::${NAMESPACE}Definitions)
 
+elseif(${PLUGIN_PLAYERINFO_DOLBY_IMPLEMENTATION} STREQUAL "Nexus")
+    find_package(NXCLIENT REQUIRED)
+    target_compile_definitions(PlayerInfoDolby
+        PRIVATE
+            NEXUS_SERVER_EXTERNAL)
+
+    target_sources(PlayerInfoDolby
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Nexus/Implementation.cpp)
+
+    target_link_libraries(PlayerInfoDolby
+        PRIVATE
+            NXCLIENT::NXCLIENT
+            ${NAMESPACE}Definitions::${NAMESPACE}Definitions)
 else()
     message(SEND_ERROR "No DOLBY_IMPLEMENTATION picked. Turn off dolby support or pick one.")
 endif()

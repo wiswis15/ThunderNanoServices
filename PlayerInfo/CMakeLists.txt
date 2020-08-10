@@ -18,7 +18,7 @@
 set(PLUGIN_NAME PlayerInfo)
 set(MODULE_NAME ${NAMESPACE}${PLUGIN_NAME})
 
-option(DOLBY_SUPPORT "Build the PlayerInfo with dolby support" OFF)
+option(PLUGIN_PLAYERINFO_DOLBY_SUPPORT "Build the PlayerInfo with dolby support" OFF)
 
 find_package(${NAMESPACE}Plugins REQUIRED)
 find_package(${NAMESPACE}Definitions REQUIRED)
@@ -41,7 +41,7 @@ target_link_libraries(${MODULE_NAME}
 
 find_package(GSTREAMER REQUIRED)
 
-if(DOLBY_SUPPORT)
+if(PLUGIN_PLAYERINFO_DOLBY_SUPPORT)
 
     target_sources(${MODULE_NAME}
         PRIVATE
