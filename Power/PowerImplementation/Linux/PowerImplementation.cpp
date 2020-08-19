@@ -261,6 +261,7 @@ void power_deinitialize() {
 
     if (implementation != nullptr) {
         delete implementation;
+        implementation = nullptr;
     }
 }
 
