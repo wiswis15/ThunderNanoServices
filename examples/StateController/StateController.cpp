@@ -16,7 +16,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "StateController.h"
 
 namespace WPEFramework {
@@ -27,23 +27,40 @@ namespace Plugin {
     /* virtual */ const string StateController::Initialize(PluginHost::IShell* service)
     {
         string message;
-        ASSERT(_service == nullptr);
+        ASSERT(service != nullptr);
+        _stateController = service->Root<Exchange::IWebDriver>(_connectionId, Core::infinite, _T("StateControllerImplementation"));
 
-        // Setup skip URL for right offset.
-        _service = service;
-        _skipURL = static_cast<uint8_t>(_service->WebPrefix().length());
+        if (_stateController == nullptr) {
+            RPC::IRemoteConnection* connection(service->RemoteConnection(_connectionId));
+            if (connection != nullptr) {
+                connection->Terminate();
+                connection->Release();
+            }
+            message = _T("StateControllerPlugin could not be instantiated.");
 
-        // Receive all plugin information on state changes.
-        _service->Register(&_sink);
+        } else {
+            fprintf(stderr, "\n------->> [%d]\033[1m\033[31m Configuring StateController \033[0m<<-------\n", ::getpid());
+            _stateController->Configure(service);
+            fprintf(stderr, "\n------->> [%d]\033[1m\033[31m Configuring StateController - done \033[0m<<-------\n", ::getpid());
+        }
 
         return message;
     }
 
     /* virtual */ void StateController::Deinitialize(PluginHost::IShell* service)
     {
-        ASSERT(_service == service);
+        if (_stateController != nullptr) {
+            if (_stateController->Release() != Core::ERROR_DESTRUCTION_SUCCEEDED) {
 
-        _clients.clear();
+                ASSERT(_connectionId != 0);
+
+                RPC::IRemoteConnection* connection(service->RemoteConnection(_connectionId));
+                if (connection != nullptr) {
+                    connection->Terminate();
+                    connection->Release();
+                }
+            }
+        }
 
         _service = nullptr;
     }
@@ -52,35 +69,6 @@ namespace Plugin {
     {
         // No additional info to report.
         return (string());
-    }
-
-    void StateController::StateChange(PluginHost::IShell* plugin)
-    {
-        const string callsign(plugin->Callsign());
-        _adminLock.Lock();
-
-        std::map<const string, Entry>::iterator index(_clients.find(callsign));
-
-        if (plugin->State() == PluginHost::IShell::ACTIVATED) {
-
-            if (index == _clients.end()) {
-                PluginHost::IStateControl* stateControl(plugin->QueryInterface<PluginHost::IStateControl>());
-
-                if (stateControl != nullptr) {
-                    _clients.emplace(std::piecewise_construct,
-                        std::forward_as_tuple(callsign),
-                        std::forward_as_tuple(stateControl));
-                    stateControl->Release();
-                }
-            }
-        } else if (plugin->State() == PluginHost::IShell::DEACTIVATION) {
-
-            if (index != _clients.end()) { // Remove from the list, if it is already there
-                _clients.erase(index);
-            }
-        }
-
-        _adminLock.Unlock();
     }
 
 } //namespace Plugin

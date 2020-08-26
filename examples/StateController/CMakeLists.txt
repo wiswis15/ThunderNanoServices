@@ -23,6 +23,7 @@ find_package(${NAMESPACE}Definitions REQUIRED)
 find_package(CompileSettingsDebug CONFIG REQUIRED)
 
 add_library(${MODULE_NAME} SHARED
+    StateControllerImplementation.cpp
     StateController.cpp
     Module.cpp)
 

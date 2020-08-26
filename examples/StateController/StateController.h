@@ -20,66 +20,13 @@
 #pragma once
 
 #include "Module.h"
+#include <interfaces/IWebDriver.h>
 
 namespace WPEFramework {
 namespace Plugin {
 
     class StateController
         : public PluginHost::IPlugin {
-
-    private:
-        class Entry {
-        private:
-            Entry() = delete;
-            Entry(const Entry& copy) = delete;
-            Entry& operator=(const Entry&) = delete;
-
-        public:
-            Entry(PluginHost::IStateControl* entry)
-                : _stateController(entry)
-            {
-                ASSERT(_stateController != nullptr);
-                _stateController->AddRef();
-            }
-            ~Entry()
-            {
-                _stateController->Release();
-            }
-
-            PluginHost::IStateControl* _stateController;
-        };
-
-    private:
-        class Notification
-            : public PluginHost::IPlugin::INotification {
-
-        public:
-            Notification() = delete;
-            Notification(const Notification&) = delete;
-            Notification& operator=(const Notification&) = delete;
-
-            explicit Notification(StateController* parent)
-                : _parent(*parent)
-            {
-                ASSERT(parent != nullptr);
-            }
-            ~Notification()
-            {
-            }
-
-        public:
-            void StateChange(PluginHost::IShell* plugin) override
-            {
-                _parent.StateChange(plugin);
-            }
-
-            BEGIN_INTERFACE_MAP(Notification)
-            INTERFACE_ENTRY(PluginHost::IPlugin::INotification)
-            END_INTERFACE_MAP
-
-        private:
-            StateController& _parent;
-        };
 
     public:
         StateController(const StateController&) = delete;
@@ -92,8 +39,8 @@ namespace Plugin {
             : _adminLock()
             , _skipURL(0)
             , _service(nullptr)
-            , _clients()
-            , _sink(this)
+            , _stateController(nullptr)
+            , _connectionId(0)
         {
         }
         #ifdef __WINDOWS__
@@ -107,6 +54,7 @@ namespace Plugin {
     public:
         BEGIN_INTERFACE_MAP(StateController)
         INTERFACE_ENTRY(PluginHost::IPlugin)
+        INTERFACE_AGGREGATE(Exchange::IWebDriver, _stateController)
         END_INTERFACE_MAP
 
     public:
@@ -131,13 +79,12 @@ namespace Plugin {
         string Information() const override;
 
     private:
-        void StateChange(PluginHost::IShell* plugin);
 
         Core::CriticalSection _adminLock;
         uint32_t _skipURL;
         PluginHost::IShell* _service;
-        std::map<const string, Entry> _clients;
-        Core::Sink<Notification> _sink;
+        Exchange::IWebDriver* _stateController;
+        uint32_t _connectionId;
     };
 } //namespace Plugin
 } //namespace WPEFramework
