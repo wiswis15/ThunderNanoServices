@@ -14,109 +14,106 @@ using std::vector;
 // TODO: don't create our own thread, use threadpool from WPEFramework
 
 namespace WPEFramework {
+
+enum CollectMode {
+   Single,    // Expect one process that can come and go
+   Multiple,  // Expect several processes with the same name
+   Callsign,  // Log Thunder process by callsign
+   ClassName, // Log Thunder process by class name
+   Invalid
+};
+ENUM_CONVERSION_BEGIN(CollectMode)
+    { CollectMode::Single, _TXT("single") },
+    { CollectMode::Multiple, _TXT("multiple") },
+    { CollectMode::Callsign, _TXT("callsign") },
+    { CollectMode::ClassName, _TXT("className") },
+    { CollectMode::Invalid, _TXT("invalid") },
+ENUM_CONVERSION_END(CollectMode);
+
 namespace Plugin {
    class ResourceMonitorImplementation : public Exchange::IResourceMonitor {
-  private:
-      class Config : public Core::JSON::Container {
+   private:
+      class Entry : public Core::JSON::Container {
       public:
-         enum class CollectMode {
-            Single,    // Expect one process that can come and go
-            Multiple,  // Expect several processes with the same name
-            Callsign,  // Log Thunder process by callsign
-            ClassName, // Log Thunder process by class name
-            Invalid
-         };
+         Entry()
+            : Core::JSON::Container()
+            , Mode()
+            , Process()
+         {
+            Add(_T("mode"), &Mode);
+            Add(_T("process"), &Process);
+         }
+         Entry(const Entry& copy)
+            : Core::JSON::Container()
+            , Mode(copy.Mode)
+            , Process(copy.Process)
+         {
+            Add(_T("mode"), &Mode);
+            Add(_T("parent-name"), &Process);
+         }
+         ~Entry() override = default;
 
-     private:
+      public:
+         Core::JSON::EnumType<CollectMode> Mode;
+         Core::JSON::String Process;
+      };
+
+      class Config : public Core::JSON::Container {
+      private:
          Config& operator=(const Config&) = delete;
          
-     public:
+      public:
          Config()
              : Core::JSON::Container()
              , Path()
              , Interval()
-             , Mode()
-             , ParentName()
+             , Processes()
          {
             Add(_T("path"), &Path);
             Add(_T("interval"), &Interval);
-            Add(_T("mode"), &Mode);
-            Add(_T("parent-name"), &ParentName);
+            Add(_T("processes"), &Processes);
          }
          Config(const Config& copy)
              : Core::JSON::Container()
              , Path(copy.Path)
              , Interval(copy.Interval)
-             , Mode(copy.Mode)
-             , ParentName(copy.ParentName)
+             , Processes(copy.Processes)
          {
             Add(_T("path"), &Path);
             Add(_T("interval"), &Interval);
-            Add(_T("mode"), &Mode);
-            Add(_T("parent-name"), &ParentName);
+            Add(_T("processes"), &Processes);
          }
-         ~Config()
-         {
-         }
+         ~Config() override = default;
          
-         CollectMode GetCollectMode() const
-         {
-             if (Mode == "single") {
-                return CollectMode::Single;
-             } else if(Mode == "multiple") {
-                return CollectMode::Multiple;
-             } else if (Mode == "callsign") {
-                return CollectMode::Callsign;
-             } else if (Mode == "classname") {
-                return CollectMode::ClassName;
-             }
-
-             // TODO: no assert, should be logged
-             ASSERT(!"Not a valid collect mode!");
-             return CollectMode::Invalid;
-         }
-
      public:
          Core::JSON::String Path;
          Core::JSON::DecUInt32 Interval;
-         Core::JSON::String Mode;
-         Core::JSON::String ParentName;
+         Core::JSON::ArrayType<Entry> Processes;
       };
 
-      class StatCollecter {
-     public:
-         explicit StatCollecter(const Config& config)
-             : _binFile(nullptr)
-             , _otherMap(nullptr)
-             , _ourMap(nullptr)
-             , _bufferEntries(0)
-             , _interval(0)
-             , _collectMode(Config::CollectMode::Invalid)
-             , _activity(*this)
+      class ProcessStat {
+      public:
+         ProcessStat() = delete;
+         ProcessStat(const ProcessStat&) = default;
+         ProcessStat& operator=(const ProcessStat&) = default;
+
+         explicit ProcessStat(const string& parentName, const string& path, const CollectMode& mode, const uint32_t bufferEntries)
+            : _mode(mode)
+            , _binFile(nullptr)
+            , _parentName(parentName)
+            , _otherMap(nullptr)
+            , _ourMap(nullptr)
+            , _bufferEntries(bufferEntries)
+            , _namesLock()
          {
-            _binFile = fopen(config.Path.Value().c_str(), "w");
-
-            uint32_t pageCount = Core::SystemInfo::Instance().GetPhysicalPageCount();
-            const uint32_t bitPersUint32 = 32;
-            _bufferEntries = pageCount / bitPersUint32;
-            if ((pageCount % bitPersUint32) != 0) {
-               _bufferEntries++;
-            }
-
-            // Because linux doesn't report the first couple of pages it uses itself,
-            //    allocate a little extra to make sure we don't miss the highest ones.
-            _bufferEntries += _bufferEntries / 10;
+            string binFileName = path + '/' + parentName + ".bin";
+            _binFile = fopen(binFileName.c_str(), "w");
 
             _ourMap = new uint32_t[_bufferEntries];
             _otherMap = new uint32_t[_bufferEntries];
-            _interval = config.Interval.Value();
-            _collectMode = config.GetCollectMode();
-            _parentName = config.ParentName.Value();
-
-            _activity.Submit();
          }
 
-         ~StatCollecter()
+         ~ProcessStat()
          {
             fclose(_binFile);
 
@@ -124,11 +121,28 @@ namespace Plugin {
             delete [] _otherMap;
          }
 
+         void CollectData() {
+
+            switch(_mode) {
+               case CollectMode::Single:
+                  CollectSingle();
+                  break;
+               case CollectMode::Multiple:
+                  CollectMultiple();
+                  break;
+               case CollectMode::Callsign:
+                  CollectWPEProcess("-C");
+                  break;
+               case CollectMode::ClassName:
+                  CollectWPEProcess("-c");
+                  break;
+               case CollectMode::Invalid:
+                  // TODO: ASSERT?
+                  break;
+            }
+         }
          void GetProcessNames(vector<string>& processNames)
          {
-            _namesLock.Lock();
-            processNames = _processNames;
-            _namesLock.Unlock();
          }
 
       private:
@@ -287,31 +301,6 @@ namespace Plugin {
             }
          }
 
-     protected:
-         void Dispatch()
-         {
-            switch(_collectMode) {
-               case Config::CollectMode::Single:
-                  CollectSingle();
-                  break;
-               case Config::CollectMode::Multiple: 
-                  CollectMultiple();
-                  break;
-               case Config::CollectMode::Callsign: 
-                  CollectWPEProcess("-C");
-                  break;
-               case Config::CollectMode::ClassName:
-                  CollectWPEProcess("-c");
-                  break;
-               case Config::CollectMode::Invalid:
-                  // TODO: ASSERT?
-                  break;
-            }
-
-            _activity.Schedule(Core::Time::Now().Add(_interval * 1000));
-         }
-
-    private:
          uint32_t CountSetBits(uint32_t pageBuffer[], const uint32_t* inverseMask)
          {
             uint32_t count = 0;
@@ -355,15 +344,75 @@ namespace Plugin {
             fwrite(&jiffies, 1, sizeof(jiffies), _binFile);
          }
 
-         FILE *_binFile;
-         vector<string> _processNames; // Seen process names.
-         Core::CriticalSection _namesLock;
+      private:
+         CollectMode _mode; // Collection style.
+         FILE *_binFile; // Process specific bin file to store collected data
+         string _parentName; // Process/plugin name we are looking for.
+
          uint32_t * _otherMap; // Buffer used to mark other processes pages.
          uint32_t * _ourMap;   // Buffer for pages used by our process (tree).
          uint32_t _bufferEntries; // Numer of entries in each buffer.
+
+         vector<string> _processNames; // Seen process names.
+         Core::CriticalSection _namesLock;
+      };
+
+   private:
+      using ProcessMap = std::map<string, ProcessStat>;
+
+      class StatCollecter {
+      public:
+         explicit StatCollecter(const Config& config)
+             : _interval(0)
+             , _activity(*this)
+         {
+            uint32_t pageCount = Core::SystemInfo::Instance().GetPhysicalPageCount();
+            const uint32_t bitPersUint32 = 32;
+            uint32_t bufferEntries = pageCount / bitPersUint32;
+            if ((pageCount % bitPersUint32) != 0) {
+               bufferEntries++;
+            }
+
+            // Because linux doesn't report the first couple of pages it uses itself,
+            //    allocate a little extra to make sure we don't miss the highest ones.
+            bufferEntries += bufferEntries / 10;
+
+            _interval = config.Interval.Value();
+            if (config.Path.IsSet() == true) {
+               Core::JSON::ArrayType<Entry>::ConstIterator index(config.Processes.Elements());
+               while (index.Next() == true) {
+                  if (index.Current().Process.IsSet() == true) {
+                     _processMap.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(index.Current().Process.Value()),
+                        std::forward_as_tuple(index.Current().Process.Value(), config.Path.Value(), index.Current().Mode.Value(), bufferEntries));
+                  }
+               }
+            }
+            _activity.Submit();
+         }
+
+         ~StatCollecter()
+         {
+            _processMap.clear();
+         }
+
+         ProcessMap& GetProcessMap()
+         {
+             return _processMap;
+         }
+
+    protected:
+         void Dispatch()
+         {
+            for (auto& process: _processMap) {
+                process.second.CollectData();
+            }
+            _activity.Schedule(Core::Time::Now().Add(_interval * 1000));
+         }
+
+    private:
          uint32_t _interval; // Seconds between measurement.
-         Config::CollectMode _collectMode; // Collection style.
-         string _parentName; // Process/plugin name we are looking for.
+         ProcessMap _processMap;
          Core::WorkerPool::JobType<StatCollecter&> _activity;
 
          friend Core::ThreadPool::JobType<StatCollecter&>;
@@ -376,7 +425,7 @@ namespace Plugin {
   public:
       ResourceMonitorImplementation()
           : _processThread(nullptr)
-          , _binPath(_T("/tmp/resource-log.bin"))
+          , _binPath(_T("/tmp/"))
       {
       }
 
@@ -400,90 +449,102 @@ namespace Plugin {
              _binPath = config.Path.Value().c_str();
          }
 
-         result = Core::ERROR_NONE;
-
          _processThread = new StatCollecter(config);
+         ASSERT(_processThread != nullptr);
+
+         if (_processThread != nullptr) {
+            result = Core::ERROR_NONE;
+         }
 
          return (result);
       }
 
       string CompileMemoryCsv() override
       {
-         // TODO: should we worry about doing this as repsonse to RPC (could take too long?)
-         FILE* inFile = fopen(_binPath.c_str(), "rb");
-
          stringstream output;
-         if (inFile != nullptr) {
 
-            vector<string> processNames;
-            _processThread->GetProcessNames(processNames);
+         Core::Directory binDir(_binPath.c_str());
+         if (binDir.Next() == true) {
 
-            output << _T("time (s)\tJiffies");
-            for (const string& processName : processNames) {
-               output << _T("\t") << processName << _T(" (VSS)\t") << processName << _T(" (USS)\t") << processName << _T(" (jiffies)");
-            }
-            output << endl;
+            // TODO: should we worry about doing this as repsonse to RPC (could take too long?)
+            ProcessMap& processMap = _processThread->GetProcessMap();
 
-            vector<uint64_t> pageVector(processNames.size() * 3);
-            bool seenFirstTimestamp = false;
-            uint32_t firstTimestamp = 0;
+            for (auto& process: processMap) {
+               string binFileName = _binPath + '/' + process.first + ".bin";
+               FILE* inFile = fopen(binFileName.c_str(), "rb");
 
-            while (true) {
-               std::fill(pageVector.begin(), pageVector.end(), 0);
+               if (inFile != nullptr) {
 
-               uint32_t timestamp = 0;
-               size_t readCount = fread(&timestamp, sizeof(timestamp), 1, inFile);
-               if (readCount != 1) {
-                  break;
-               }
+                  vector<string> processNames;
+                  process.second.GetProcessNames(processNames);
+                  output << _T("time (s)\tJiffies");
+                  for (const string& processName : processNames) {
+                     output << _T("\t") << processName << _T(" (VSS)\t") << processName << _T(" (USS)\t") << processName << _T(" (jiffies)");
+                  }
+                  output << endl;
 
-               if (!seenFirstTimestamp) {
-                  firstTimestamp = timestamp;
-                  seenFirstTimestamp = true;
-               }
+                  vector<uint64_t> pageVector(processNames.size() * 3);
+                  bool seenFirstTimestamp = false;
+                  uint32_t firstTimestamp = 0;
 
-               uint32_t processCount = 0;
-               fread(&processCount, sizeof(processCount), 1, inFile);
+                  while (true) {
+                     std::fill(pageVector.begin(), pageVector.end(), 0);
 
-               uint64_t totalJiffies = 0;
-               fread(&totalJiffies, sizeof(totalJiffies), 1, inFile);
+                     uint32_t timestamp = 0;
+                     size_t readCount = fread(&timestamp, sizeof(timestamp), 1, inFile);
+                     if (readCount != 1) {
+                        break;
+                     }
 
-               for (uint32_t processIndex = 0; processIndex < processCount; processIndex++) {
-                  uint32_t nameLength = 0;
-                  fread(&nameLength, sizeof(nameLength), 1, inFile);
-                  // TODO: unicode?
-                  char nameBuffer[nameLength + 1];
-                  fread(nameBuffer, sizeof(char), nameLength, inFile);
+                     if (!seenFirstTimestamp) {
+                        firstTimestamp = timestamp;
+                        seenFirstTimestamp = true;
+                     }
 
-                  nameBuffer[nameLength] = '\0';
-                  string name(nameBuffer);
+                     uint32_t processCount = 0;
+                     fread(&processCount, sizeof(processCount), 1, inFile);
 
-                  vector<string>::const_iterator nameIterator = std::find(processNames.cbegin(), processNames.cend(), name);
+                     uint64_t totalJiffies = 0;
+                     fread(&totalJiffies, sizeof(totalJiffies), 1, inFile);
 
-                  uint32_t vss, uss;
-                  uint64_t jiffies;
-                  fread(&vss, sizeof(vss), 1, inFile);
-                  fread(&uss, sizeof(uss), 1, inFile);
-                  fread(&jiffies, sizeof(jiffies), 1, inFile);
-                  if (nameIterator == processNames.cend()) {
-                     continue;
+                     for (uint32_t processIndex = 0; processIndex < processCount; processIndex++) {
+                        uint32_t nameLength = 0;
+                        fread(&nameLength, sizeof(nameLength), 1, inFile);
+                        // TODO: unicode?
+                        char nameBuffer[nameLength + 1];
+                        fread(nameBuffer, sizeof(char), nameLength, inFile);
+
+                        nameBuffer[nameLength] = '\0';
+                        string name(nameBuffer);
+
+                        vector<string>::const_iterator nameIterator = std::find(processNames.cbegin(), processNames.cend(), name);
+
+                        uint32_t vss, uss;
+                        uint64_t jiffies;
+                        fread(&vss, sizeof(vss), 1, inFile);
+                        fread(&uss, sizeof(uss), 1, inFile);
+                        fread(&jiffies, sizeof(jiffies), 1, inFile);
+                        if (nameIterator == processNames.cend()) {
+                           continue;
+                        }
+
+                        int index = nameIterator - processNames.cbegin();
+
+                        pageVector[index * 3] = static_cast<uint64_t>(vss);
+                        pageVector[index * 3 + 1] = static_cast<uint64_t>(uss);
+                        pageVector[index * 3 + 2] = jiffies;
+                     }
+
+                     output << (timestamp - firstTimestamp) << "\t" << totalJiffies;
+                     for (uint32_t pageEntry : pageVector) {
+                        output << "\t" << pageEntry;
+                     }
+                     output << endl;
                   }
 
-                  int index = nameIterator - processNames.cbegin();
-
-                  pageVector[index * 3] = static_cast<uint64_t>(vss);
-                  pageVector[index * 3 + 1] = static_cast<uint64_t>(uss);
-                  pageVector[index * 3 + 2] = jiffies;
+                  fclose(inFile);
                }
-
-               output << (timestamp - firstTimestamp) << "\t" << totalJiffies;
-               for (uint32_t pageEntry : pageVector) {
-                  output << "\t" << pageEntry;
-               }
-               output << endl;
             }
-
-            fclose(inFile);
          }
 
          return output.str();
