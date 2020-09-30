@@ -1241,14 +1241,14 @@ static GSourceFuncs _handlerIntervention =
             webkit_settings_set_enable_webgl(preferences, _config.WebGLEnabled.Value());
 
             webkit_settings_set_enable_non_composited_webgl(preferences, _config.NonCompositedWebGLEnabled.Value());
-
+#ifdef FIXME_DISABLE_FOR_MCA_EXPLORA
             // Media Content Types Requiring Hardware Support
             if (_config.MediaContentTypesRequiringHardwareSupport.IsSet() == true
                 && _config.MediaContentTypesRequiringHardwareSupport.Value().empty() == false) {
                 webkit_settings_set_media_content_types_requiring_hardware_support(preferences,
                     _config.MediaContentTypesRequiringHardwareSupport.Value().c_str());
             }
-
+#endif
             if (_config.UserAgent.IsSet() == true && _config.UserAgent.Value().empty() == false)
                 webkit_settings_set_user_agent(preferences, _config.UserAgent.Value().c_str());
 
@@ -1409,6 +1409,7 @@ static GSourceFuncs _handlerIntervention =
             //Turn on/off WebGL
             WKPreferencesSetWebGLEnabled(preferences, _config.WebGLEnabled.Value());
 
+#ifdef FIXME_DISABLE_FOR_MCA_EXPLORA
             // Media Content Types Requiring Hardware Support
             if (_config.MediaContentTypesRequiringHardwareSupport.IsSet() == true
                 && _config.MediaContentTypesRequiringHardwareSupport.Value().empty() == false) {
@@ -1417,7 +1418,7 @@ static GSourceFuncs _handlerIntervention =
               WKPreferencesSetMediaContentTypesRequiringHardwareSupport(preferences, contentTypes);
               WKRelease(contentTypes);
             }
-
+#endif
             WKPageGroupSetPreferences(pageGroup, preferences);
 
             auto pageConfiguration = WKPageConfigurationCreate();

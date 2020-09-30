@@ -24,7 +24,7 @@ namespace WPEFramework
     namespace Plugin
     {
 
-        class DolbyOutputImplementation : public Exchange::Dolby::IOutput
+        class EXTERNAL DolbyOutputImplementation : public Exchange::Dolby::IOutput
         {
         public:
             void Mode(const Exchange::Dolby::IOutput::Type value) override
@@ -42,6 +42,20 @@ namespace WPEFramework
                 ASSERT(errorCode == Core::ERROR_NONE);
                 return result;
             };
+
+            bool AtmosLock(uint32_t& error) const override
+            {
+                fprintf(stderr, "***AG-PRINT*[%s:%d %s]  \n", __FILE__, __LINE__, __PRETTY_FUNCTION__);
+                bool status = get_atmos_lock(error);
+                return status;
+            }
+
+            uint32_t AtmosLock(bool enable) override
+            {
+                fprintf(stderr, "***AG-PRINT*[%s:%d %s]  \n", __FILE__, __LINE__, __PRETTY_FUNCTION__);
+                uint32_t status = set_atmos_lock(enable);
+                return status;
+            }
 
             BEGIN_INTERFACE_MAP(DolbyOutputImplementation)
                 INTERFACE_ENTRY(Exchange::Dolby::IOutput)

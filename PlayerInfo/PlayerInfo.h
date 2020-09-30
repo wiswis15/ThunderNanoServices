@@ -52,6 +52,7 @@ namespace Plugin {
         INTERFACE_ENTRY(PluginHost::IWeb)
         INTERFACE_ENTRY(PluginHost::IDispatcher)
         INTERFACE_AGGREGATE(Exchange::IPlayerProperties, _player)
+        INTERFACE_AGGREGATE(Exchange::Dolby::IOutput, _dolbyOut);
         END_INTERFACE_MAP
 
     public:
