@@ -18,8 +18,10 @@
  */
  
 #include "../Module.h"
-#include <interfaces/IDisplayInfo.h>
 #include "../DisplayInfoTracing.h"
+#include "../ExtendedDisplayIdentification.h"
+
+#include <interfaces/IDisplayInfo.h>
 
 #include <nexus_config.h>
 #include <nexus_platform.h>
@@ -32,6 +34,7 @@
     )
 
 #define NEXUS_HDCPVERSION_SUPPORTED
+#define NEXUS_HDR_SUPPORTED
 
 #endif
 
@@ -39,7 +42,10 @@
 namespace WPEFramework {
 namespace Plugin {
 
-class DisplayInfoImplementation : public Exchange::IGraphicsProperties, public Exchange::IConnectionProperties {
+class DisplayInfoImplementation : 
+    public Exchange::IGraphicsProperties, 
+    public Exchange::IConnectionProperties,
+    public Exchange::IHDRProperties  {
 public:
     DisplayInfoImplementation()
        : _width(0)
@@ -51,6 +57,7 @@ public:
        , _totalGpuRam(0)
        , _audioPassthrough(false)
        , _atmosSupport(false)
+       , _EDID()
        , _adminLock()
        , _activity(*this) {
 
@@ -82,11 +89,12 @@ public:
 
 public:
     // Graphics Properties interface
-    uint64_t TotalGpuRam() const override
+    uint32_t TotalGpuRam(uint64_t& total) const override
     {
-        return _totalGpuRam;
+        total = _totalGpuRam;
+        return Core::ERROR_NONE;
     }
-    uint64_t FreeGpuRam() const override
+    uint32_t FreeGpuRam(uint64_t& free) const override
     {
         uint64_t freeRam = 0;
         NEXUS_MemoryStatus status;
@@ -116,7 +124,8 @@ public:
             }
         }
 #endif
-        return (freeRam);
+        free = (freeRam);
+        return rc == NEXUS_SUCCESS ? Core::ERROR_NONE : Core::ERROR_GENERAL;
     }
 
     // Connection Properties interface
@@ -153,36 +162,66 @@ public:
         return (Core::ERROR_NONE);
     }
 
-    bool IsAudioPassthrough () const override
+    uint32_t IsAudioPassthrough (bool& value) const override
     {
-        return _audioPassthrough;
+        value = _audioPassthrough;
+        return (Core::ERROR_NONE);
     }
-    bool Connected() const override
+    uint32_t Connected(bool& connected) const override
     {
-        return _connected;
+        connected = _connected;
+        return (Core::ERROR_NONE);
     } 
-    uint32_t Width() const override
+    uint32_t Width(uint32_t& value) const override
     {
-        return _width;
+        value = _width;
+        return (Core::ERROR_NONE);
     }
-    uint32_t Height() const override
+    uint32_t Height(uint32_t& value) const override
     {
-        return _height;
+        value = _height;
+        return (Core::ERROR_NONE);
     }
-    uint32_t VerticalFreq() const override
+    uint32_t VerticalFreq(uint32_t& value) const override
     {
-        return _verticalFreq;
+        value = _verticalFreq;
+        return (Core::ERROR_NONE);
     }
-    HDRType Type() const override
+    uint32_t IsAtmosSupported(bool& supported) const override
     {
-        return _type;
+        supported = _atmosSupport;
+        return (Core::ERROR_NONE);
     }
-    bool IsAtmosSupported() const override {
-        return _atmosSupport;
+    uint32_t HDCPProtection(HDCPProtectionType& value) const override {
+        value = _hdcpprotection;
+        return (Core::ERROR_NONE);
     }
-    HDCPProtectionType HDCPProtection() const override {
-        return _hdcpprotection;
+    uint32_t HDCPProtection(const HDCPProtectionType /* value */) override {
+        return (Core::ERROR_GENERAL);
     }
+    uint32_t EDID (uint16_t& length /* @inout */, uint8_t data[] /* @out @length:length */) const override {
+        /* length = */ _EDID.Raw(length, data);
+        return (Core::ERROR_NONE);
+    }
+    uint32_t PortName (string& name /* @out */) const {
+        name = "HDMI" + Core::NumberType<uint8_t>(0).Text();
+        return (Core::ERROR_NONE);
+    }
+
+    uint32_t TVCapabilities(IHDRIterator*& type) const override
+    {
+        return (Core::ERROR_UNAVAILABLE);
+    }
+    uint32_t STBCapabilities(IHDRIterator*& type) const override
+    {
+        return (Core::ERROR_UNAVAILABLE);
+    }
+    uint32_t HDRSetting(HDRType& type) const override
+    {
+        type = _type;
+        return (Core::ERROR_NONE);
+    }
+
     void Dispatch() const
     {
         _adminLock.Lock();
@@ -190,7 +229,7 @@ public:
         std::list<IConnectionProperties::INotification*>::const_iterator index = _observers.begin();
 
         while(index != _observers.end()) {
-            (*index)->Updated();
+            (*index)->Updated(IConnectionProperties::INotification::Source::HDCP_CHANGE);
             index++;
         }
 
@@ -200,6 +239,7 @@ public:
     BEGIN_INTERFACE_MAP(DisplayInfoImplementation)
         INTERFACE_ENTRY(Exchange::IGraphicsProperties)
         INTERFACE_ENTRY(Exchange::IConnectionProperties)
+        INTERFACE_ENTRY(Exchange::IHDRProperties)
     END_INTERFACE_MAP
 
 private:
@@ -351,13 +391,13 @@ private:
 #endif
 
     class NexusHdmiOutput {
-        public:
+    public:
         NexusHdmiOutput(const NexusHdmiOutput&) = delete;
         NexusHdmiOutput& operator=(const NexusHdmiOutput&) = delete;
 
-        NexusHdmiOutput() : _hdmiOutput(nullptr) {
+        NexusHdmiOutput(const uint8_t hdmiPort = 0) : _hdmiOutput(nullptr) {
 
-            _hdmiOutput = NEXUS_HdmiOutput_Open(NEXUS_ALIAS_ID + 0, NULL);
+            _hdmiOutput = NEXUS_HdmiOutput_Open(NEXUS_ALIAS_ID + hdmiPort, NULL);
 
             if( _hdmiOutput == nullptr ) {
                 TRACE(Trace::Error, (_T("Error opening Nexus HDMI ouput")));
@@ -393,29 +433,31 @@ private:
             if (connected == true) {
                 NxClient_DisplaySettings displaySettings;
                 NxClient_GetDisplaySettings(&displaySettings);
-
 #if ((NEXUS_PLATFORM_VERSION_MAJOR >= 19) && (NEXUS_PLATFORM_VERSION_MINOR >= 2))
                 NEXUS_HdmiOutputEdidRxDolbyAudioCodecDependent edidDataDolby;
                 NEXUS_HdmiOutput_GetDbCodecDependentEdidData(hdmiOutput, &edidDataDolby);
                 isAtmosSupported = edidDataDolby.ddpAtmosSupported;
 #endif
 
-#if ((NEXUS_PLATFORM_VERSION_MAJOR >= 19) && (NEXUS_PLATFORM_VERSION_MINOR >= 2))
-                NEXUS_HdmiOutputEdidData edidData;
-                NEXUS_Error edidRc = NEXUS_HdmiOutput_GetEdidData(hdmiOutput, &edidData);
-                if(edidRc != NEXUS_SUCCESS){
-                    TRACE_L1(_T("Failed to get edidData with rc=%d", edidRc));
+
+                NxClient_DisplayStatus status;
+                NEXUS_Error rcStatus = NxClient_GetDisplayStatus(&status);
+                if(rcStatus != NEXUS_SUCCESS){
+                    TRACE_L1(_T("Failed to get display status with rc=%d", rcStatus));
                 }
-                if(edidData.hdrdb.valid == true) {
-                    if((edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_eHdr10] == true) || (edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_ePq] == true)){
-                        hdr = HDR_10;
-                    } else if(edidData.hdrdb.eotfSupported[NEXUS_VideoEotf_eHlg] == true) {
-                        hdr = HDR_HLG;
-                    } else {
-                        hdr = HDR_OFF;
-                    }
-                } else {
-                    TRACE_L1(_T("Failed to get edid hdr db"));
+
+#ifdef NEXUS_HDR_SUPPORTED
+                // Read HDR status
+                switch (status.hdmi.dynamicRangeMode) {
+                case NEXUS_VideoDynamicRangeMode_eHdr10:
+                    hdr = HDR_10;
+                    break;
+                case NEXUS_VideoDynamicRangeMode_eHdr10Plus:
+                    hdr = HDR_10PLUS;
+                    break;
+                default:
+                    hdr = HDR_OFF;
+                    break;
                 }
 #else
                 switch (displaySettings.hdmiPreferences.drmInfoFrame.eotf) {
@@ -570,6 +612,9 @@ private:
             default:
                 break;
             }
+            if (connected == true) {
+                RetrieveEDID(hdmiHandle, _EDID);
+            }
         }
         _adminLock.Unlock();
 
@@ -577,6 +622,30 @@ private:
             _activity.Submit();
         }
     }
+
+    // rc = BHDM_EDID_GetHdrStaticMetadatadb(hdmiOutput->hdmHandle, &_hdrdb);
+    void RetrieveEDID(NEXUS_HdmiOutputHandle handle, ExtendedDisplayIdentification& info) {
+        // typedef struct NEXUS_HdmiOutputEdidBlock
+        // {
+        //     uint8_t data[128];
+        // } NEXUS_HdmiOutputEdidBlock;
+
+        // NEXUS_Error NEXUS_HdmiOutput_GetEdidBlock(
+        //      NEXUS_HdmiOutputHandle output,
+        //      unsigned blockNum,
+        //      NEXUS_HdmiOutputEdidBlock *pBlock    /* [out] Block of raw EDID data */
+        //      );
+        NEXUS_Error error;
+        uint8_t index = 0;
+
+        do {
+            error = NEXUS_HdmiOutput_GetEdidBlock(handle, index, reinterpret_cast<NEXUS_HdmiOutputEdidBlock*>(info.Segment(index)));
+
+            index++;
+
+        } while ( (index <= info.Segments()) && (error == 0) );
+    }
+
 
 private:
     uint32_t _width;
@@ -594,6 +663,7 @@ private:
     std::list<IConnectionProperties::INotification*> _observers;
 
     NEXUS_PlatformConfiguration _platformConfig;
+    ExtendedDisplayIdentification _EDID;
 
     mutable Core::CriticalSection _adminLock;
 

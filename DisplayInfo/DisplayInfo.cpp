@@ -42,6 +42,7 @@ namespace Plugin {
         if (_connectionProperties != nullptr) {
 
             _graphicsProperties = _connectionProperties->QueryInterface<Exchange::IGraphicsProperties>();
+            _hdrProperties = _connectionProperties->QueryInterface<Exchange::IHDRProperties>();
             if (_graphicsProperties == nullptr) {
 
                 _connectionProperties->Release();
@@ -76,6 +77,10 @@ namespace Plugin {
             _connectionProperties = nullptr;
         }
 
+        if (_hdrProperties != nullptr) {
+            _hdrProperties->Release();
+            _hdrProperties = nullptr;
+        }
         _connectionId = 0;
     }
 
@@ -122,16 +127,42 @@ namespace Plugin {
 
     void DisplayInfo::Info(JsonData::DisplayInfo::DisplayinfoData& displayInfo) const
     {
-        displayInfo.Totalgpuram = _graphicsProperties->TotalGpuRam();
-        displayInfo.Freegpuram = _graphicsProperties->FreeGpuRam();
+        bool boolean;
+        uint32_t value;
+        uint64_t value64;
+        Exchange::IHDRProperties::HDRType hdrType;
+        Exchange::IConnectionProperties::HDCPProtectionType hdcpType;
 
-        displayInfo.Audiopassthrough = _connectionProperties->IsAudioPassthrough();
-        displayInfo.Connected = _connectionProperties->Connected();
-        displayInfo.Width = _connectionProperties->Width();
-        displayInfo.Height = _connectionProperties->Height();
-        displayInfo.Atmossupported = _connectionProperties->IsAtmosSupported();
-        displayInfo.Hdcpprotection = static_cast<JsonData::DisplayInfo::DisplayinfoData::HdcpprotectionType>(_connectionProperties->HDCPProtection());
-        displayInfo.Hdrtype = static_cast<JsonData::DisplayInfo::DisplayinfoData::HdrtypeType>(_connectionProperties->Type());
+        if (_graphicsProperties->TotalGpuRam(value64) == Core::ERROR_NONE) {
+            displayInfo.Totalgpuram = value64;
+        }
+
+        if (_graphicsProperties->FreeGpuRam(value64) == Core::ERROR_NONE) {
+            displayInfo.Freegpuram = value64;
+        }
+
+        if (_connectionProperties->IsAtmosSupported(boolean) == Core::ERROR_NONE) {
+            displayInfo.Atmossupported = boolean;
+        }
+
+        if (_connectionProperties->IsAudioPassthrough(boolean) == Core::ERROR_NONE) {
+            displayInfo.Audiopassthrough = boolean;
+        }
+        if (_connectionProperties->Connected(boolean) == Core::ERROR_NONE) {
+            displayInfo.Connected = boolean;
+        }
+        if (_connectionProperties->Width(value) == Core::ERROR_NONE) {
+            displayInfo.Width = value;
+        }
+        if (_connectionProperties->Height(value) == Core::ERROR_NONE) {
+            displayInfo.Height = value;
+        }
+        if (static_cast<const Exchange::IConnectionProperties*>(_connectionProperties)->HDCPProtection(hdcpType) == Core::ERROR_NONE) {
+            displayInfo.Hdcpprotection = static_cast<JsonData::DisplayInfo::DisplayinfoData::HdcpprotectionType>(hdcpType);
+        }
+        if ((_hdrProperties != nullptr) && (_hdrProperties->HDRSetting(hdrType) == Core::ERROR_NONE)) {
+            displayInfo.Hdrtype = static_cast<JsonData::DisplayInfo::DisplayinfoData::HdrtypeType>(hdrType);
+        }
     }
 
 } // namespace Plugin
