@@ -31,7 +31,7 @@ namespace Plugin {
     static const string _DefaultControlExtension(_T("Run"));
     static const string _DefaultAppInfoDevice(_T("DeviceInfo.xml"));
     static const string _DefaultRunningExtension(_T("Running"));
-    static const string _DefaultHiddenExtension(_T("Hidden"));
+    static const string _DefaultHiddenExtension(_T("Hidding"));
     static const string _SystemApp(_T("system"));
 
     constexpr char kHideCommand[] = "hide";
