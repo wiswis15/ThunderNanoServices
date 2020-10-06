@@ -46,6 +46,7 @@ namespace Plugin {
                     , Config()
                     , RuntimeChange(false)
                     , Hide(false)
+                    , ConcatenatePayload(false)
                 {
                     Add(_T("name"), &Name);
                     Add(_T("callsign"), &Callsign);
@@ -54,6 +55,7 @@ namespace Plugin {
                     Add(_T("config"), &Config);
                     Add(_T("runtimechange"), &RuntimeChange);
                     Add(_T("hide"), &Hide);
+                    Add(_T("concatenatepayload"), &ConcatenatePayload);
                 }
                 App(const App& copy)
                     : Core::JSON::Container()
@@ -64,6 +66,7 @@ namespace Plugin {
                     , Config(copy.Config)
                     , RuntimeChange(copy.RuntimeChange)
                     , Hide(copy.Hide)
+                    , ConcatenatePayload(copy.ConcatenatePayload)
                 {
                     Add(_T("name"), &Name);
                     Add(_T("callsign"), &Callsign);
@@ -72,6 +75,7 @@ namespace Plugin {
                     Add(_T("config"), &Config);
                     Add(_T("runtimechange"), &RuntimeChange);
                     Add(_T("hide"), &Hide);
+                    Add(_T("concatenatepayload"), &ConcatenatePayload);
                 }
                 virtual ~App()
                 {
@@ -85,6 +89,7 @@ namespace Plugin {
                 Core::JSON::String Config;
                 Core::JSON::Boolean RuntimeChange;
                 Core::JSON::Boolean Hide;
+                Core::JSON::Boolean ConcatenatePayload;
             };
 
         private:
@@ -254,6 +259,7 @@ namespace Plugin {
                 , _hasRuntimeChange(config.RuntimeChange.Value())
                 , _hasHideAndShow(config.Hide.Value())
                 , _parent(parent)
+                , _concatenatePayload(config.ConcatenatePayload.Value())
             {
                 ASSERT(_parent != nullptr);
 
@@ -286,6 +292,22 @@ namespace Plugin {
                 }
             }
 
+        private:
+            string ConcatenatePayload(const string& params, const string& payload)
+            {
+                string result = params;
+
+                if (payload.empty() == false) {
+                // Netflix expects the payload as urlencoded option "dial"
+                    const uint16_t maxEncodeSize = static_cast<uint16_t>(payload.length() * 3 * sizeof(TCHAR));
+                    TCHAR* encodedPayload = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodeSize));
+                    Core::URL::Encode(payload.c_str(), static_cast<uint16_t>(payload.length()), encodedPayload, maxEncodeSize);
+                    result = result + _T("&dial=") + encodedPayload;
+                }
+            
+                return (result);
+            }
+
         public:
             // Methods that the DIALServer requires.
             virtual bool IsRunning() const
@@ -316,9 +338,10 @@ namespace Plugin {
             {
                 uint32_t result = Core::ERROR_NONE;
                 if (_passiveMode == true) {
-                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\",  \"parameters\":\"" + parameters +  ", \"payload\":\"" + payload +"\" }"));
+                    string params =  _concatenatePayload ? ConcatenatePayload(parameters, payload) : parameters;        
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\",  \"parameters\":\"" + params +  ", \"payload\":\"" + payload +"\" }"));
                     _service->Notify(message);
-                    _parent->event_start(_callsign, parameters, payload);
+                    _parent->event_start(_callsign, _concatenatePayload ? ConcatenatePayload(parameters, payload) : parameters, payload);
                     
                 } else {
                     if (_switchBoard != nullptr) {
@@ -445,6 +468,7 @@ namespace Plugin {
             bool _hasHideAndShow;
             DIALServer* _parent;
             AdditionalDataType _additionalData;
+            bool _concatenatePayload;
         };
 
     private:
