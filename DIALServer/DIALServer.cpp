@@ -278,7 +278,7 @@ namespace Plugin {
         _config.FromString(service->ConfigLine());
 
         // get an interface with a public IP address, then we will have a proper MAC address..
-        Core::NodeId selectedNode = Plugin::Config::IPV4UnicastNode(_config.Interface.Value());
+        Core::NodeId selectedNode = Core::NodeId(_config.Interface.Value().c_str());
 
         if (selectedNode.IsValid() == false) {
             // Oops no way we can operate...
