@@ -45,6 +45,7 @@ namespace Plugin {
                     , URL()
                     , Config()
                     , RuntimeChange(false)
+                    , Hide(false)
                 {
                     Add(_T("name"), &Name);
                     Add(_T("callsign"), &Callsign);
@@ -52,6 +53,7 @@ namespace Plugin {
                     Add(_T("url"), &URL);
                     Add(_T("config"), &Config);
                     Add(_T("runtimechange"), &RuntimeChange);
+                    Add(_T("hide"), &Hide);
                 }
                 App(const App& copy)
                     : Core::JSON::Container()
@@ -61,6 +63,7 @@ namespace Plugin {
                     , URL(copy.URL)
                     , Config(copy.Config)
                     , RuntimeChange(copy.RuntimeChange)
+                    , Hide(copy.Hide)
                 {
                     Add(_T("name"), &Name);
                     Add(_T("callsign"), &Callsign);
@@ -68,6 +71,7 @@ namespace Plugin {
                     Add(_T("url"), &URL);
                     Add(_T("config"), &Config);
                     Add(_T("runtimechange"), &RuntimeChange);
+                    Add(_T("hide"), &Hide);
                 }
                 virtual ~App()
                 {
@@ -80,6 +84,7 @@ namespace Plugin {
                 Core::JSON::String URL;
                 Core::JSON::String Config;
                 Core::JSON::Boolean RuntimeChange;
+                Core::JSON::Boolean Hide;
             };
 
         private:
@@ -150,7 +155,7 @@ namespace Plugin {
 
             // Start an application with specified URL / payload
             // Can only be called if HasStartAndStop() evaluates to true
-            virtual uint32_t Start(const string& data, const string& payload) = 0;
+            virtual uint32_t Start(const string& parameters, const string& payload) = 0;
 
             // Connect DIAL handler with the service (eg. DIAL of youtube to cobalt).
             // Returns true if connection is successfull, false otherwise
@@ -159,9 +164,9 @@ namespace Plugin {
             // Returns whether DIAL handler is connected with the service
             virtual bool IsConnected() = 0;
 
-            // Stop a running service. Additional data can be passed if in passive mode
+            // Stop a running service. Additional parameters can be passed if in passive mode
             // Can only be called if HasStartAndStop() evaluates to true
-            virtual void Stop(const string& data, const string& payload) = 0;
+            virtual void Stop(const string& parameters, const string& payload) = 0;
 
             virtual bool IsHidden() const = 0;
 
@@ -183,6 +188,10 @@ namespace Plugin {
             // Used only in passive mode
             virtual void Running(const bool isRunning) = 0;
 
+            // Method used for setting the wheter managed service is hidden or not. 
+            // Used only in passive mode
+            virtual void Hidden(const bool isHidden) = 0;
+
             // Method used for passing a SwitchBoard to DIAL handler. 
             // Used only in switchboard mode
             virtual void SwitchBoard(Exchange::ISwitchBoard* switchBoard) = 0;
@@ -200,13 +209,13 @@ namespace Plugin {
             ~System() override {}
             bool IsRunning() const { return true; }
             bool HasStartAndStop() const override { return false; }
-            uint32_t Start(const string& data, const string& payload) override {
+            uint32_t Start(const string& parameters, const string& payload) override {
                 ASSERT(!"Not supported and not even supposed to");
                 return Core::ERROR_GENERAL;
             }
             bool Connect() override { return true;}
             bool IsConnected() override {return true;}
-            void Stop(const string& data, const string& payload) { ASSERT(!"Not supported and not even supposed to"); }
+            void Stop(const string& parameters, const string& payload) { ASSERT(!"Not supported and not even supposed to"); }
             bool HasHideAndShow() const { return true; }
             bool IsHidden() const { return true; }
             uint32_t Show() override { return Core::ERROR_GENERAL; }
@@ -216,6 +225,7 @@ namespace Plugin {
             AdditionalDataType AdditionalData() const override { return { }; }
             void AdditionalData(AdditionalDataType&& data) override {}
             void Running(const bool isRunning) override {}
+            void Hidden(const bool isHidden) override {}
             void SwitchBoard(Exchange::ISwitchBoard* switchBoard) override {}
         };
 
@@ -240,7 +250,9 @@ namespace Plugin {
                 , _callsign(config.Callsign.IsSet() == true ? config.Callsign.Value() : config.Name.Value())
                 , _passiveMode(config.Callsign.IsSet() == false)
                 , _isRunning(false)
+                , _isHidden(false)
                 , _hasRuntimeChange(config.RuntimeChange.Value())
+                , _hasHideAndShow(config.Hide.Value())
                 , _parent(parent)
             {
                 ASSERT(_parent != nullptr);
@@ -280,18 +292,34 @@ namespace Plugin {
             {
                 return (_passiveMode == true ? _isRunning : (_switchBoard != nullptr ? _switchBoard->IsActive(_callsign) : (_service->State() == PluginHost::IShell::ACTIVATED)));
             }
-            bool IsHidden() const override { return false; }
-            bool HasHideAndShow() const override { return false; }
+            bool IsHidden() const override { return _isHidden; }
+            bool HasHideAndShow() const override { return _hasHideAndShow; }
             bool HasStartAndStop() const override { return true; }
-            uint32_t Show() override { return Core::ERROR_GENERAL; }
-            void Hide() override {}
-            virtual uint32_t Start(const string& data, const string& payload)
+            uint32_t Show() override 
+            {
+                if ((_passiveMode == true) && (_isHidden ==true)) {
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"show\" }"));
+                    _service->Notify(message);
+                    _parent->event_show(_callsign);   
+                } 
+                return Core::ERROR_NONE; 
+            }
+            void Hide() override 
+            {
+                if (_passiveMode == true) {
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"hide\" }"));
+                    _service->Notify(message);
+                    _parent->event_hide(_callsign);
+                }
+            }
+            virtual uint32_t Start(const string& parameters, const string& payload)
             {
                 uint32_t result = Core::ERROR_NONE;
                 if (_passiveMode == true) {
-                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\", \"data\":\"" + data + "\" }"));
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\",  \"parameters\":\"" + parameters +  ", \"payload\":\"" + payload +"\" }"));
                     _service->Notify(message);
-                    _parent->event_start(_callsign, data);
+                    _parent->event_start(_callsign, parameters, payload);
+                    
                 } else {
                     if (_switchBoard != nullptr) {
                         result = _switchBoard->Activate(_callsign);
@@ -304,19 +332,19 @@ namespace Plugin {
                             TRACE_L1("DIAL: Failed to attach to service");
                             result = Core::ERROR_UNAVAILABLE;
                         } else {
-                            URL(data, payload);
+                            URL(parameters, payload);
                         }
                     }
                 }
 
                 return result;
             }
-            virtual void Stop(const string& data, const string& payload)
+            virtual void Stop(const string& parameters, const string& payload)
             {
                 if (_passiveMode == true) {
-                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"stop\", \"data\":\"" + data + "\"}"));
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"stop\", \"parameters\":\"" + parameters + ", \"payload\":\"" + payload + "\"}"));            
                     _service->Notify(message);
-                    _parent->event_stop(_callsign, data);
+                    _parent->event_stop(_callsign, parameters);
                 } else {
                     if (_switchBoard != nullptr) {
                         _switchBoard->Deactivate(_callsign);
@@ -343,7 +371,7 @@ namespace Plugin {
 
                 if (_hasRuntimeChange == true) {
                     if (_passiveMode == true) {
-                        const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"change\", \"data\":\"" + url + "\"}"));
+                        const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"change\", \"parameters\":\"" + url + "\"}"));
                         _service->Notify(message);
                         result = true;
                     }
@@ -376,6 +404,15 @@ namespace Plugin {
 
                 _isRunning = isRunning;
             }
+            virtual void Hidden(const bool isHidden)
+            {
+                // This method is only for the Passive mode..
+                if (_passiveMode != true) {
+                    TRACE_L1(_T("This app is not configured to be Passive !!!!%s"), "");
+                }
+
+                _isHidden = isHidden;
+            }
             virtual void SwitchBoard(Exchange::ISwitchBoard* switchBoard)
             {
                 ASSERT((_switchBoard != nullptr) ^ (switchBoard != nullptr));
@@ -403,7 +440,9 @@ namespace Plugin {
             string _callsign;
             bool _passiveMode;
             bool _isRunning;
+            bool _isHidden;
             bool _hasRuntimeChange;
+            bool _hasHideAndShow;
             DIALServer* _parent;
             AdditionalDataType _additionalData;
         };
@@ -532,7 +571,7 @@ namespace Plugin {
                 return application;
             }
         };
-        class EXTERNAL Protocol {
+        class Protocol {
         private:
             // -------------------------------------------------------------------
             // This object should not be copied or assigned. Prevent the copy
@@ -742,13 +781,17 @@ namespace Plugin {
             {
                 _application->Running(isRunning);
             }
-            inline uint32_t Start(const string& data, const string& payload)
+            inline void Hidden(const bool isHidden)
             {
-                return _application->Start(data, payload);
+                _application->Hidden(isHidden);
             }
-            inline void Stop(const string& data, const string& payload)
+            inline uint32_t Start(const string& parameters, const string& payload)
             {
-                _application->Stop(data, payload);
+                return _application->Start(parameters, payload);
+            }
+            inline void Stop(const string& parameters, const string& payload)
+            {
+                _application->Stop(parameters, payload);
             }
             inline bool HasStartAndStop() const
             {
@@ -1036,8 +1079,10 @@ namespace Plugin {
         void StopApplication(const Web::Request& request, Core::ProxyType<Web::Response>& response, AppInformation& app);
 
         //JsonRpc
-        void event_start(const string& application, const string& parameters);
+        void event_start(const string& application, const string& parameters, const string& payload);
         void event_stop(const string& application, const string& parameters);
+        void event_hide(const string& application);
+        void event_show(const string& application);
 
     private:
         Core::CriticalSection _adminLock;
