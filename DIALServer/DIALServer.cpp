@@ -31,6 +31,7 @@ namespace Plugin {
     static const string _DefaultControlExtension(_T("Run"));
     static const string _DefaultAppInfoDevice(_T("DeviceInfo.xml"));
     static const string _DefaultRunningExtension(_T("Running"));
+    static const string _DefaultHiddenExtension(_T("Hidden"));
     static const string _SystemApp(_T("system"));
 
     constexpr char kHideCommand[] = "hide";
@@ -211,7 +212,7 @@ namespace Plugin {
     void DIALServer::AppInformation::GetData(string& data, const Version& version) const
     {
         bool running = IsRunning();
-        bool hidden = HasHideAndShow() == true && IsHidden() == true;
+        bool hidden = HasHide() == true && IsHidden() == true;
         bool isAtLeast2_1 = Version{2, 1, 0} <= version;
         // allowSop is mandatory to be true starting from 2.1
         string allowStop = isAtLeast2_1 == true || HasStartAndStop() == true ? "true" : "false";
@@ -395,12 +396,14 @@ namespace Plugin {
             response->ErrorCode = Web::STATUS_REQUEST_ENTITY_TOO_LARGE;
             response->Message = _T("Payload too long");
         } else {
-            const string additionalDataUrl = (_T("http://localhost/") + app.Name() + _T("/") + _DefaultDataExtension);
-            TCHAR encodedDataUrl[additionalDataUrl.length() * 3 * sizeof(TCHAR)];
-            Core::URL::Encode(additionalDataUrl.c_str(), static_cast<uint16_t>(additionalDataUrl.length()), encodedDataUrl, static_cast<uint16_t>(sizeof(encodedDataUrl)));
+            // FIXME: At the moment part of additionalDataUrl parameter is hardcoded, localhost is obligatory by Netflix 
+            // but rest of the path can be created dynamically or should be retrived from configuration    
+            const string additionalDataUrl = (_T("http://localhost") + ((_webServerPort.empty() == true)? _T("") : _T(":") + _webServerPort) + _T("/Service/DIALServer/Apps/") + app.Name() + _T("/") + _DefaultDataExtension);
+            const uint16_t maxEncodedSize = static_cast<uint16_t>(additionalDataUrl.length() * 3 * sizeof(TCHAR));
+            TCHAR* encodedDataUrl = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodedSize)); 
             string parameters = (app.AppURL() + (app.HasQueryParameter()? _T("&") : _T("?")) + _T("additionalDataUrl=") + encodedDataUrl);
 
-            TRACE(Trace::Information, (_T("Launch Application [%s] with params: %s"), app.Name().c_str(), parameters.c_str()));
+            TRACE(Trace::Information, (_T("Launch Application [%s] with params: %s, payload: %s"), app.Name().c_str(), parameters.c_str(), payload.c_str()));
 
             // See if we can find the plugin..
             ASSERT(_service != NULL);
@@ -425,8 +428,8 @@ namespace Plugin {
                 if (app.IsConnected() == false && app.Connect() == false) {
                     
                     TRACE_L1("Cannot connect DIAL handler to application %s", app.Name().c_str());
-                } else if (app.HasHideAndShow() == true && app.IsHidden() == true) {
-                    uint32_t result = app.Show();
+                } else if (app.HasHide() == true && app.IsHidden() == true) {
+                    uint32_t result = app.Start(parameters, payload);
 
                     // system app has special error codes. Handle them here.
                     if (app.Name() == _SystemApp) {
@@ -442,15 +445,9 @@ namespace Plugin {
                         }
                     } else {
                         if (result == Core::ERROR_NONE) {
-                            if (app.URL(parameters, payload) == true) {
-                                response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
-                                response->ErrorCode = Web::STATUS_CREATED;
-                                response->Message = _T("Created");
-                            }
-                            else {
-                                response->ErrorCode = Web::STATUS_NOT_IMPLEMENTED;
-                                response->Message = _T("Not implemented");
-                            }
+                            response->Location = _dialServiceImpl->URL() + '/' + app.Name() + '/' + _DefaultControlExtension;
+                            response->ErrorCode = Web::STATUS_CREATED;
+                            response->Message = _T("Created");
                         }
                         else {
                             response->ErrorCode = Web::STATUS_SERVICE_UNAVAILABLE;
@@ -600,7 +597,7 @@ namespace Plugin {
                     } else if (request.Verb == Web::Request::HTTP_POST) {
                         if (index.Next() == true && index.Current() == kHideCommand) {
                             if (selectedApp->second.IsRunning() == true) {
-                                if (selectedApp->second.HasHideAndShow() == true) {
+                                if (selectedApp->second.HasHide() == true) {
                                     result->ErrorCode = Web::STATUS_OK;
                                     result->Message = _T("OK");
                                     selectedApp->second.Hide();
@@ -622,6 +619,12 @@ namespace Plugin {
                         result->Message = _T("OK");
                         selectedApp->second.Running(request.Verb == Web::Request::HTTP_POST);
                     }
+                } else if (index.Current() == _DefaultHiddenExtension) {
+                    if ((request.Verb == Web::Request::HTTP_POST) || (request.Verb == Web::Request::HTTP_DELETE)) {
+                        result->ErrorCode = Web::STATUS_OK;
+                        result->Message = _T("OK");
+                        selectedApp->second.Hidden(request.Verb == Web::Request::HTTP_POST);
+                    }    
                 } else if (index.Current() == _DefaultDataExtension) {
                     result->ErrorCode = Web::STATUS_OK;
                     result->Message = _T("OK");
@@ -654,6 +657,11 @@ namespace Plugin {
 
         // Let's set the URL of the WebServer, as it is active :-)
         _dialServiceImpl->Locator(pluginInterface->Accessor() + _dialPath);
+
+        Core::URL url = Core::URL(pluginInterface->Accessor());
+        if (url.Port().IsSet() == true) {
+            _webServerPort = Core::NumberType<uint16_t>(url.Port().Value()).Text();
+        }
 
         // Redirect all calls to the DIALServer, via a proxy.
         pluginInterface->AddProxy(_dialPath, _dialPath, remote);
