@@ -212,7 +212,7 @@ namespace Plugin {
     void DIALServer::AppInformation::GetData(string& data, const Version& version) const
     {
         bool running = IsRunning();
-        bool hidden = HasHide() == true && IsHidden() == true;
+        bool hidden = HasHideAndShow() == true && IsHidden() == true;
         bool isAtLeast2_1 = Version{2, 1, 0} <= version;
         // allowSop is mandatory to be true starting from 2.1
         string allowStop = isAtLeast2_1 == true || HasStartAndStop() == true ? "true" : "false";
@@ -428,8 +428,8 @@ namespace Plugin {
                 if (app.IsConnected() == false && app.Connect() == false) {
                     
                     TRACE_L1("Cannot connect DIAL handler to application %s", app.Name().c_str());
-                } else if (app.HasHide() == true && app.IsHidden() == true) {
-                    uint32_t result = app.Start(parameters, payload);
+                } else if (app.HasHideAndShow() == true && app.IsHidden() == true) {
+                    uint32_t result = app.Show();
 
                     // system app has special error codes. Handle them here.
                     if (app.Name() == _SystemApp) {
@@ -597,7 +597,7 @@ namespace Plugin {
                     } else if (request.Verb == Web::Request::HTTP_POST) {
                         if (index.Next() == true && index.Current() == kHideCommand) {
                             if (selectedApp->second.IsRunning() == true) {
-                                if (selectedApp->second.HasHide() == true) {
+                                if (selectedApp->second.HasHideAndShow() == true) {
                                     result->ErrorCode = Web::STATUS_OK;
                                     result->Message = _T("OK");
                                     selectedApp->second.Hide();
