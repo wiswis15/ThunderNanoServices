@@ -39,6 +39,15 @@ namespace Plugin {
         Notify(_T("hide"), params);
     }
 
+    // Event: show - Signals that application show was requested over DIAL *(passive mode only)*
+    void DIALServer::event_show(const string& application)
+    {
+        HideParamsData params;
+        params.Application = application;
+
+        Notify(_T("show"), params);
+    }
+
     // Event: start - Signals that application start was requested over DIAL *(passive mode only)*
     void DIALServer::event_start(const string& application, const string& parameters, const string& payload)
     {

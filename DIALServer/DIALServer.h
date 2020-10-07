@@ -154,7 +154,7 @@ namespace Plugin {
             virtual bool HasStartAndStop() const = 0;
 
             // Returns wheter DIAL handler has ability to hide & show a service
-            virtual bool HasHide() const = 0;
+            virtual bool HasHideAndShow() const = 0;
 
             // Start an application with specified URL / payload
             // Can only be called if HasStartAndStop() evaluates to true
@@ -173,7 +173,10 @@ namespace Plugin {
 
             virtual bool IsHidden() const = 0;
 
-            // Hide service. Can be used only if HasHide() evaluates to true
+            // Make serivce visible. Can be used only if HasHideAndShow() evaluates to true
+            virtual uint32_t Show() = 0;
+
+            // Hide service. Can be used only if HasHideAndShow() evaluates to true
             virtual void Hide() = 0;
 
             // Methods for passing a URL to DIAL handler
@@ -216,8 +219,9 @@ namespace Plugin {
             bool Connect() override { return true;}
             bool IsConnected() override {return true;}
             void Stop(const string& parameters, const string& payload) { ASSERT(!"Not supported and not even supposed to"); }
-            bool HasHide() const { return true; }
+            bool HasHideAndShow() const { return true; }
             bool IsHidden() const { return true; }
+            uint32_t Show() override { return Core::ERROR_GENERAL; }
             void Hide() override {}
             string URL() const override { return {}; }
             bool URL(const string& url, const string& payload) override { return (false); };
@@ -251,7 +255,7 @@ namespace Plugin {
                 , _isRunning(false)
                 , _isHidden(false)
                 , _hasRuntimeChange(config.RuntimeChange.Value())
-                , _hasHide(config.Hide.Value())
+                , _hasHideAndShow(config.Hide.Value())
                 , _parent(parent)
             {
                 ASSERT(_parent != nullptr);
@@ -292,8 +296,17 @@ namespace Plugin {
                 return (_passiveMode == true ? _isRunning : (_switchBoard != nullptr ? _switchBoard->IsActive(_callsign) : (_service->State() == PluginHost::IShell::ACTIVATED)));
             }
             bool IsHidden() const override { return _isHidden; }
-            bool HasHide() const override { return _hasHide; }
+            bool HasHideAndShow() const override { return _hasHideAndShow; }
             bool HasStartAndStop() const override { return true; }
+            uint32_t Show() override 
+            {
+                if ((_passiveMode == true) && (_isHidden ==true)) {
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"show\" }"));
+                    _service->Notify(message);
+                    _parent->event_show(_callsign);   
+                } 
+                return Core::ERROR_NONE; 
+            }
             void Hide() override 
             {
                 if (_passiveMode == true) {
@@ -432,7 +445,7 @@ namespace Plugin {
             bool _isRunning;
             bool _isHidden;
             bool _hasRuntimeChange;
-            bool _hasHide;
+            bool _hasHideAndShow;
             DIALServer* _parent;
             AdditionalDataType _additionalData;
         };
@@ -747,9 +760,13 @@ namespace Plugin {
             { 
                 return (_application->IsHidden()); 
             }
-            inline bool HasHide() const
+            inline bool HasHideAndShow() const
             {
-                return _application->HasHide();
+                return _application->HasHideAndShow();
+            }
+            inline uint32_t Show()
+            {
+                return _application->Show();
             }
             inline void Hide() 
             { 
@@ -1070,6 +1087,7 @@ namespace Plugin {
         void event_start(const string& application, const string& parameters, const string& payload);
         void event_stop(const string& application, const string& parameters);
         void event_hide(const string& application);
+        void event_show(const string& application);
 
         inline const bool DeprecatedAPI() const { return _deprecatedAPI;}
 
