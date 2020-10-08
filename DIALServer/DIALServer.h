@@ -106,6 +106,7 @@ namespace Plugin {
                 , Interface()
                 , WebServer()
                 , SwitchBoard()
+                , DeprecatedAPI(true)
             {
                 Add(_T("interface"), &Interface);
                 Add(_T("name"), &Name);
@@ -119,6 +120,7 @@ namespace Plugin {
                 Add(_T("upc"), &UPC);
                 Add(_T("webserver"), &WebServer);
                 Add(_T("switchboard"), &SwitchBoard);
+                Add(_T("deprecatedapi"), &DeprecatedAPI);
                 Add(_T("apps"), &Apps);
             }
             ~Config()
@@ -138,6 +140,7 @@ namespace Plugin {
             Core::JSON::String Interface;
             Core::JSON::String WebServer;
             Core::JSON::String SwitchBoard;
+            Core::JSON::Boolean DeprecatedAPI;
             Core::JSON::ArrayType<App> Apps;
         };
 
@@ -1005,6 +1008,7 @@ namespace Plugin {
             , _deviceInfo(Core::ProxyType<Web::TextBody>::Create())
             , _sink(this)
             , _appInfo()
+            , _deprecatedAPI(false)
         {
         }
 #ifdef __WINDOWS__
@@ -1067,6 +1071,8 @@ namespace Plugin {
         void event_stop(const string& application, const string& parameters);
         void event_hide(const string& application);
 
+        inline const bool DeprecatedAPI() const { return _deprecatedAPI;}
+
     private:
         Core::CriticalSection _adminLock;
         uint32_t _skipURL;
@@ -1079,6 +1085,7 @@ namespace Plugin {
         Core::ProxyType<Web::TextBody> _deviceInfo;
         Core::Sink<Notification> _sink;
         std::map<const string, AppInformation> _appInfo;
+        bool _deprecatedAPI;
     };
 }
 }
