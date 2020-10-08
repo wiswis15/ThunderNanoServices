@@ -289,6 +289,22 @@ namespace Plugin {
                 }
             }
 
+        private:
+            string ConcatenatePayload(const string& params, const string& payload)
+            {
+                string result = params;
+
+                if (payload.empty() == false) {
+                // Netflix expects the payload as urlencoded option "dial"
+                    const uint16_t maxEncodeSize = static_cast<uint16_t>(payload.length() * 3 * sizeof(TCHAR));
+                    TCHAR* encodedPayload = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodeSize));
+                    Core::URL::Encode(payload.c_str(), static_cast<uint16_t>(payload.length()), encodedPayload, maxEncodeSize);
+                    result = result + _T("&dial=") + encodedPayload;
+                }
+
+                return (result);
+            }
+
         public:
             // Methods that the DIALServer requires.
             virtual bool IsRunning() const
@@ -319,9 +335,9 @@ namespace Plugin {
             {
                 uint32_t result = Core::ERROR_NONE;
                 if (_passiveMode == true) {
-                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\",  \"parameters\":\"" + parameters +  ", \"payload\":\"" + payload +"\" }"));
+                    const string message(_T("{ \"application\": \"") + _callsign + _T("\", \"request\":\"start\",  \"parameters\":\"" + ( (_parent->DeprecatedAPI() == true) ? ConcatenatePayload(parameters, payload) : parameters) +  ", \"payload\":\"" + payload +"\" }"));
                     _service->Notify(message);
-                    _parent->event_start(_callsign, parameters, payload);
+                    _parent->event_start(_callsign, (_parent->DeprecatedAPI() == true) ? ConcatenatePayload(parameters, payload) : parameters, payload);
                     
                 } else {
                     if (_switchBoard != nullptr) {
