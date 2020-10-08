@@ -277,6 +277,8 @@ namespace Plugin {
 
         _config.FromString(service->ConfigLine());
 
+        _deprecatedAPI = _config.DeprecatedAPI.Value();
+
         // get an interface with a public IP address, then we will have a proper MAC address..
         Core::NodeId selectedNode = Core::NodeId(_config.Interface.Value().c_str());
 
@@ -401,9 +403,8 @@ namespace Plugin {
             const string additionalDataUrl = (_T("http://localhost") + ((_webServerPort.empty() == true)? _T("") : _T(":") + _webServerPort) + _T("/Service/DIALServer/Apps/") + app.Name() + _T("/") + _DefaultDataExtension);
             const uint16_t maxEncodedSize = static_cast<uint16_t>(additionalDataUrl.length() * 3 * sizeof(TCHAR));
             TCHAR* encodedDataUrl = reinterpret_cast<TCHAR*>(ALLOCA(maxEncodedSize)); 
-            Core::URL::Encode(additionalDataUrl.c_str(), static_cast<uint16_t>(additionalDataUrl.length()), encodedDataUrl, maxEncodedSize);
-            string parameters = (app.AppURL() + (app.HasQueryParameter()? _T("&") : _T("?")) + _T("additionalDataUrl=") + encodedDataUrl);
-
+            uint16_t dialpayload = Core::URL::Encode(additionalDataUrl.c_str(), static_cast<uint16_t>(additionalDataUrl.length()), encodedDataUrl, maxEncodedSize);
+            const string parameters = (app.AppURL() + (app.HasQueryParameter()? _T("&") : _T("?")) + ( (DeprecatedAPI() == true) ? ( _T("dialpayload=") + std::to_string(dialpayload) + _T("&") ) : _T(""))  + _T("additionalDataUrl=") + encodedDataUrl);
             TRACE(Trace::Information, (_T("Launch Application [%s] with params: %s, payload: %s"), app.Name().c_str(), parameters.c_str(), payload.c_str()));
 
             // See if we can find the plugin..
@@ -430,7 +431,7 @@ namespace Plugin {
                     
                     TRACE_L1("Cannot connect DIAL handler to application %s", app.Name().c_str());
                 } else if (app.HasHideAndShow() == true && app.IsHidden() == true) {
-                    uint32_t result = app.Show();
+                    uint32_t result = (DeprecatedAPI() == true) ? app.Show() : app.Start(parameters, payload);
 
                     // system app has special error codes. Handle them here.
                     if (app.Name() == _SystemApp) {
@@ -620,7 +621,7 @@ namespace Plugin {
                         result->Message = _T("OK");
                         selectedApp->second.Running(request.Verb == Web::Request::HTTP_POST);
                     }
-                } else if (index.Current() == _DefaultHiddenExtension) {
+                } else if (index.Current() == ((DeprecatedAPI() == true) ? _T("hidding") : _DefaultHiddenExtension)) {
                     if ((request.Verb == Web::Request::HTTP_POST) || (request.Verb == Web::Request::HTTP_DELETE)) {
                         result->ErrorCode = Web::STATUS_OK;
                         result->Message = _T("OK");
