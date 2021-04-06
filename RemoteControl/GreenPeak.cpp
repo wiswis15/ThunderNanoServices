@@ -350,15 +350,15 @@ namespace Plugin {
         // -------------------------------------------------------------------------------
         static char* UserString()
         {
-            return (_singleton->_userString);
+            return (_singleton._userString);
         }
         static void Dispatch(const bool pressed, const uint16_t code, const uint16_t modifiers)
         {
-            _singleton->_Dispatch(pressed, code, modifiers);
+            _singleton._Dispatch(pressed, code, modifiers);
         }
         static void Initialized(const uint16_t major, const uint16_t minor, const uint16_t revision, const uint16_t patch, const uint32_t change)
         {
-            _singleton->_Initialized(major, minor, revision, patch, change);
+            _singleton._Initialized(major, minor, revision, patch, change);
         }
         static void Report(const string& text)
         {
@@ -367,7 +367,7 @@ namespace Plugin {
 
         static void SendEvent(Exchange::ProducerEvents event)
         {
-            _singleton->_SendEvent(event);
+            _singleton._SendEvent(event);
         }
 
     private:
@@ -463,7 +463,7 @@ namespace Plugin {
     };
 
     /* static */ const string GreenPeak::_resourceName("RF4CE");
-    /* static */ GreenPeak* GreenPeak::_singleton(Core::Service<GreenPeak>::Create<GreenPeak>());
+    /* static */ GreenPeak GreenPeak::_singleton;
 }
 } // namespace WPEFramework::Plugin
 
